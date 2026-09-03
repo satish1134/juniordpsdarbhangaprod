@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { GraduationCap, Lock, User, Loader2, ArrowRight, ShieldCheck, Clock, ShieldAlert } from "lucide-react";
+import { GraduationCap, Lock, User, Loader2, ArrowRight, ShieldCheck, Eye, EyeOff } from "lucide-react";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { adminLogin, adminMe } from "../lib/api";
@@ -12,6 +12,7 @@ import { LOGO_RADIUS_CLASS, fontFamilyFor } from "../lib/displaySizes";
 const AdminLogin = () => {
   const [form, setForm] = useState({ username: "", password: "", otp: "" });
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [needsOtp, setNeedsOtp] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -40,7 +41,7 @@ const AdminLogin = () => {
     if (!form.username || !form.password) return;
     setLoading(true);
     try {
-      const res = await adminLogin(form.username, form.password, needsOtp ? form.otp : undefined);
+      const res = await adminLogin(form.username.trim(), form.password, needsOtp ? form.otp : undefined);
       toast({ title: "Welcome back", description: `Signed in as ${res.data.username}` });
       navigate("/admin");
     } catch (err) {
@@ -91,16 +92,6 @@ const AdminLogin = () => {
           <h1 className="font-display text-3xl font-bold text-[#0a3d29]">Welcome back</h1>
           <p className="text-[14px] text-[#1c2a24]/70 mt-2">Sign in to manage enquiries and news.</p>
 
-          {isIdleTimeout && (
-            <div className="mt-5 p-3.5 rounded-2xl bg-[#c99f3b]/15 border border-[#c99f3b]/40 text-[#8a6b1e] flex items-start gap-3">
-              <Clock className="w-5 h-5 shrink-0 mt-0.5 text-[#c99f3b]" />
-              <div className="text-[12.5px] leading-relaxed">
-                <span className="font-bold block text-[#0a3d29]">Session timed out</span>
-                You were automatically signed out after 5 minutes of inactivity for portal security.
-              </div>
-            </div>
-          )}
-
           <form onSubmit={submit} className="mt-6 space-y-5">
             <div>
               <label className="text-[11px] tracking-[0.25em] uppercase text-[#0a5f3d] font-semibold">Username</label>
@@ -110,7 +101,7 @@ const AdminLogin = () => {
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                   className="pl-11 h-12 bg-white border-[#0a5f3d]/15 rounded-xl focus-visible:ring-[#0a5f3d]"
-                  placeholder="admin"
+                  autoComplete="username"
                 />
               </div>
             </div>
@@ -119,12 +110,20 @@ const AdminLogin = () => {
               <div className="mt-2 relative">
                 <Lock className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-[#0a5f3d]/60" />
                 <Input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className="pl-11 h-12 bg-white border-[#0a5f3d]/15 rounded-xl focus-visible:ring-[#0a5f3d]"
-                  placeholder="••••••••"
+                  className="pl-11 pr-11 h-12 bg-white border-[#0a5f3d]/15 rounded-xl focus-visible:ring-[#0a5f3d]"
+                  autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#0a5f3d]/60 hover:text-[#0a3d29] focus:outline-none"
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
@@ -159,10 +158,6 @@ const AdminLogin = () => {
               {loading ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Signing in…</>) : (<>Sign In <ArrowRight className="w-4 h-4 ml-2" /></>)}
             </Button>
           </form>
-
-          <div className="mt-6 pt-6 border-t border-[#0a5f3d]/10 text-[12px] text-[#1c2a24]/60 leading-relaxed">
-            <strong className="text-[#0a3d29]">Demo credentials:</strong> username <code className="text-[#0a5f3d] font-semibold">admin</code> · password <code className="text-[#0a5f3d] font-semibold">admin123</code>
-          </div>
         </div>
       </div>
     </div>
