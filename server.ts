@@ -13,7 +13,7 @@ import { Resend } from "resend";
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || "admin").trim();
-const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "admin123").trim();
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "").trim();
 
 function getMongoUrl(): string {
   const raw =
@@ -752,11 +752,10 @@ async function verifyPassword(password: string): Promise<boolean> {
   }
 
   const configuredPass = (ADMIN_PASSWORD || "").trim();
-  return (
-    trimmed === configuredPass ||
-    trimmed === "admin123" ||
-    trimmed === "admin"
-  );
+  if (configuredPass && trimmed === configuredPass) {
+    return true;
+  }
+  return false;
 }
 
 const app = express();
