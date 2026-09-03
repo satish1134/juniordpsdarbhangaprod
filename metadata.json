@@ -1,0 +1,6 @@
+{
+  "name": "Junior DPS Darbhanga",
+  "description": "Junior DPS Darbhanga — A modern CBSE-affiliation school in the heart of Darbhanga, Bihar with admissions, news, fee structure, and admin portal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

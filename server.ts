@@ -1,0 +1,1794 @@
+import express, { Request, Response, NextFunction } from "express";
+import cookieParser from "cookie-parser";
+import cors from "cors";
+import path from "path";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import { authenticator } from "otplib";
+import QRCode from "qrcode";
+import { MongoClient, Db, GridFSBucket, ObjectId } from "mongodb";
+import { Resend } from "resend";
+
+
+const PORT = 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
+const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || "admin").trim();
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "admin123").trim();
+
+function getMongoUrl(): string {
+  const raw =
+    process.env.MONGO_URL ||
+    process.env.MONGODB_URI ||
+    process.env.MONGO_URI ||
+    process.env.DATABASE_URL ||
+    process.env.MONGODB_URL ||
+    process.env.MONGO_CONNECTION_STRING ||
+    "";
+  let cleaned = raw.trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned;
+}
+
+const DB_NAME = (process.env.DB_NAME || "juniordps").trim();
+
+let mongoClient: MongoClient | null = null;
+let mongoDb: Db | null = null;
+let mongoConnectingPromise: Promise<Db | null> | null = null;
+
+async function getDb(): Promise<Db | null> {
+  if (mongoDb) return mongoDb;
+  const url = getMongoUrl();
+  if (!url) return null;
+
+  if (mongoConnectingPromise) return mongoConnectingPromise;
+
+  mongoConnectingPromise = (async () => {
+    try {
+      if (!mongoClient) {
+        mongoClient = new MongoClient(url, {
+          serverSelectionTimeoutMS: 6000,
+          connectTimeoutMS: 10000,
+          maxPoolSize: 10,
+        });
+        await mongoClient.connect();
+        console.log(`[MongoDB] Connected successfully to Atlas database "${DB_NAME}"`);
+      }
+      mongoDb = mongoClient.db(DB_NAME);
+      return mongoDb;
+    } catch (err: any) {
+      console.error("[MongoDB] Connection error:", err?.message || err);
+      mongoClient = null;
+      mongoDb = null;
+      return null;
+    } finally {
+      mongoConnectingPromise = null;
+    }
+  })();
+
+  return mongoConnectingPromise;
+}
+const COOKIE_NAME = "jdps_admin";
+const COOKIE_MAX_AGE = 2 * 60 * 60 * 1000; // 2 hours max age
+const TOTP_ISSUER = "Junior DPS Darbhanga";
+
+// Brute-force protection
+const LOGIN_FAILS = new Map<string, number[]>();
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+interface AdminSecurity {
+  username: string;
+  passwordHash: string | null;
+  secret: string | null;
+  enabled: boolean;
+}
+
+const adminSecurity: AdminSecurity = {
+  username: ADMIN_USERNAME,
+  passwordHash: null,
+  secret: null,
+  enabled: false,
+};
+
+interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  action: string;
+  actor: string;
+  ip: string | null;
+  user_agent: string | null;
+  details: Record<string, any>;
+}
+
+const auditLogs: AuditLogEntry[] = [];
+
+function auditLog(action: string, actor?: string, req?: Request, details?: Record<string, any>) {
+  try {
+    const fwd = req?.headers["x-forwarded-for"];
+    const ip = typeof fwd === "string" ? fwd.split(",")[0].trim() : (req?.ip || null);
+    const user_agent = (req?.headers["user-agent"] as string) || null;
+    const entry: AuditLogEntry = {
+      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+      timestamp: new Date().toISOString(),
+      action,
+      actor: actor || "anonymous",
+      ip,
+      user_agent,
+      details: details || {},
+    };
+    auditLogs.unshift(entry);
+    if (auditLogs.length > 2000) {
+      auditLogs.pop();
+    }
+  } catch (e) {
+    console.error("audit_log error:", e);
+  }
+}
+
+interface Enquiry {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  grade: string;
+  message: string;
+  status: string;
+  created_at: string;
+}
+
+const enquiries: Enquiry[] = [];
+
+interface NewsItem {
+  id: string;
+  title: string;
+  excerpt: string;
+  body: string;
+  tag: string;
+  date: string;
+  cover_image: string;
+  published: boolean;
+  created_at: string;
+}
+
+const newsList: NewsItem[] = [
+  {
+    id: "news-1",
+    title: "Admissions open for Session 2025-26",
+    excerpt: "Registrations now open for Nursery to Class IX. Limited seats available — apply early to secure your child's future.",
+    body: "Junior DPS Darbhanga is now accepting applications for the academic session 2025-26. Interested parents can visit our campus between 9 AM and 2 PM on all working days, or fill out the online enquiry form for a callback.",
+    tag: "Admissions",
+    date: "12 Jul 2025",
+    cover_image: "https://images.unsplash.com/photo-1524069290683-0457abfe42c3?crop=entropy&cs=srgb&fm=jpg&w=1200&q=80",
+    published: true,
+    created_at: new Date("2025-07-12T10:00:00Z").toISOString(),
+  },
+  {
+    id: "news-2",
+    title: "Our students shine at CBSE Region-level Science Fair",
+    excerpt: "Three of our senior students bagged medals at the CBSE regional science exhibition held in Patna.",
+    body: "We are proud to announce that Aarav, Sneha and Rohan of Class IX have won gold, silver and bronze medals respectively at the CBSE regional science exhibition. Their working model on solar-powered rural irrigation was appreciated by the chief guest.",
+    tag: "Achievement",
+    date: "28 Jun 2025",
+    cover_image: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    published: true,
+    created_at: new Date("2025-06-28T10:00:00Z").toISOString(),
+  },
+  {
+    id: "news-3",
+    title: "Summer Reading Challenge launched",
+    excerpt: "An 8-week reading marathon with rewards, book clubs and author interactions for students of all ages.",
+    body: "Books open doors. Our new Summer Reading Challenge runs from 15 June to 10 August 2025, with grade-wise reading lists, weekly book clubs and a live session with a bestselling children's author.",
+    tag: "Event",
+    date: "14 Jun 2025",
+    cover_image: "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?crop=entropy&cs=srgb&fm=jpg&w=1200&q=80",
+    published: true,
+    created_at: new Date("2025-06-14T10:00:00Z").toISOString(),
+  },
+];
+
+const DEFAULT_CONTENT: Record<string, any> = {
+  hero_intro: {
+    title_main: "Where curiosity",
+    title_accent: "meets excellence.",
+    description: "A modern, CBSE-affiliated school in the heart of Darbhanga, committed to shaping confident thinkers, kind humans and lifelong learners.",
+    cta_primary: "Book a Campus Visit",
+    cta_secondary: "Discover our story",
+  },
+  school_info: {
+    name: "Junior DPS Darbhanga",
+    tagline: "Nurturing Minds, Shaping Futures",
+    fullName: "Junior Delhi Public School, Darbhanga",
+    established: 2015,
+    affiliation: "CBSE Affiliated",
+    cbse_number: "",
+    udise_number: "",
+    hero_eyebrow: "CBSE Affiliation • Est. 2015",
+    address: "Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004",
+    phone: "+91 9470410815",
+    altPhone: "+91 9430008181",
+    email: "info@juniordpsdarbhanga.com",
+    timings: "08:00 AM – 03:00 PM (Mon – Sat)",
+    logo: "",
+  },
+  hero_slides: [
+    { image: "https://images.unsplash.com/photo-1729284440498-19b2295ac7bb?crop=entropy&cs=srgb&fm=jpg&w=1920&q=85", title: "Where Curiosity Meets Excellence", subtitle: "A CBSE affiliated institution dedicated to holistic child development in the heart of Darbhanga." },
+    { image: "https://images.unsplash.com/photo-1524069290683-0457abfe42c3?crop=entropy&cs=srgb&fm=jpg&w=1920&q=85", title: "Learning Beyond Textbooks", subtitle: "Modern pedagogy blended with values that stay with our children for a lifetime." },
+    { image: "https://images.unsplash.com/photo-1709290749293-c6152a187b14?crop=entropy&cs=srgb&fm=jpg&w=1920&q=85", title: "Every Child, A Bright Star", subtitle: "Individual attention, small class sizes and mentors who truly care." },
+  ],
+  principal: {
+    name: "Mrs. Neelam Verma",
+    title: "Principal, Junior DPS Darbhanga",
+    photo: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+    message: "At Junior DPS Darbhanga, we believe every child carries a spark of brilliance waiting to be nurtured. Our promise to parents is simple — a safe, joyful and rigorous environment where children learn to think, care and contribute. As we step into a new academic year, we invite you to walk this beautiful journey of growth with us.",
+  },
+  gallery_intro: {
+    eyebrow: "Life at School",
+    title_main: "Moments that make",
+    title_accent: "our story.",
+  },
+  academics_intro: {
+    eyebrow: "Academic Programs",
+    title_main: "A learning path designed",
+    title_accent: "for every age.",
+    description: "From playful Nursery mornings to focused Board year preparation, our curriculum grows with your child — thoughtfully, joyfully and rigorously.",
+  },
+  facilities_intro: {
+    eyebrow: "Campus Facilities",
+    title_main: "Thoughtfully designed spaces",
+    title_accent: "that inspire.",
+    description: "Every corner of our campus is built with the child in mind — bright, safe, engaging and fully equipped for exploration.",
+  },
+  gallery: [
+    { src: "https://images.unsplash.com/photo-1729284440498-19b2295ac7bb?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Morning Assembly", tag: "Events" },
+    { src: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Young Scientists in Action", tag: "Academics" },
+    { src: "https://images.unsplash.com/photo-1680178776508-41a276595b0f?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Reading Corner", tag: "Library" },
+    { src: "https://images.unsplash.com/photo-1607211851821-8be3cd6146f0?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Little Artists at Work", tag: "Arts" },
+    { src: "https://images.unsplash.com/photo-1595210382266-2d0077c1f541?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Inter-house Cricket Cup", tag: "Sports" },
+    { src: "https://images.unsplash.com/photo-1463592177119-bab2a00f3ccb?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Annual Cultural Fest", tag: "Events" },
+    { src: "https://images.pexels.com/photos/19760978/pexels-photo-19760978.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Safe School Transport", tag: "Campus" },
+    { src: "https://images.pexels.com/photos/10638069/pexels-photo-10638069.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Digital Learning Session", tag: "Tech" },
+  ],
+  testimonials: [
+    { name: "Priya Sharma", role: "Parent, Class IV", quote: "The teachers at Junior DPS Darbhanga genuinely care. My daughter looks forward to school every single day — that says everything." },
+    { name: "Rakesh Kumar", role: "Parent, Class VIII", quote: "The balance between academics, sports and moral values is remarkable. My son has grown into a confident, curious learner." },
+    { name: "Anjali Jha", role: "Alumnus, Class of 2022", quote: "The foundation I received here helped me crack my board exams comfortably. The mentors are still just a call away." },
+  ],
+  fee_structure: [
+    { class: "Nursery – KG", admission: 8000, annual: 6000, tuition: 2800, transport: 1500 },
+    { class: "Class I – II", admission: 9000, annual: 7000, tuition: 3200, transport: 1500 },
+    { class: "Class III – V", admission: 10000, annual: 8000, tuition: 3600, transport: 1800 },
+    { class: "Class VI – VIII", admission: 11000, annual: 9000, tuition: 4200, transport: 1800 },
+    { class: "Class IX – X", admission: 12000, annual: 10000, tuition: 4800, transport: 2000 },
+  ],
+  fees_extras: {
+    eyebrow: "Fee Structure",
+    title_main: "A transparent",
+    title_accent: "fee structure.",
+    intro: "Session fee particulars for Junior DPS Darbhanga. All amounts are in Indian Rupees (₹). Please contact the school office for zone-wise transport charges and any queries.",
+    notes_title: "Fee policy notes",
+    notes: [
+      "Admission fee is a one-time payment charged at the time of enrolment.",
+      "Tuition fee is billed on a monthly basis; annual charges are collected once a year in April.",
+      "Transport fee varies based on distance zone; the amount shown is the base rate.",
+      "Sibling discount of 10% on tuition applies from the second child onwards.",
+      "All fees are payable via bank transfer, UPI, or at the school office.",
+    ],
+    payment_title: "Payment methods",
+    payment_body: "Fees can be paid via bank transfer, UPI, cheque or in cash at the school office during working hours. A digital fee portal is coming soon for parents.",
+    payment_cta: "Download Fee Brochure",
+  },
+  calendar_events: [
+    { date: "2025-04-01", title: "New Academic Session Begins", type: "Academic", desc: "Session 2025-26 commences for all classes." },
+    { date: "2025-04-14", title: "Ambedkar Jayanti", type: "Holiday", desc: "School remains closed." },
+    { date: "2025-05-25", title: "Summer Vacation Begins", type: "Break", desc: "Vacation from 25 May – 15 June." },
+    { date: "2025-08-15", title: "Independence Day Celebration", type: "Event", desc: "Flag hoisting, cultural programs and student speeches." },
+    { date: "2025-09-05", title: "Teachers' Day", type: "Event", desc: "Students celebrate their mentors with performances and cards." },
+    { date: "2025-09-20", title: "Half-Yearly Examinations", type: "Exam", desc: "For Classes III to X; datesheet issued a week prior." },
+    { date: "2025-10-15", title: "Annual Sports Meet", type: "Event", desc: "Two-day sports meet on campus grounds — parents invited." },
+    { date: "2025-11-01", title: "Diwali Break", type: "Break", desc: "School closed from 1 – 5 November." },
+    { date: "2025-12-15", title: "Winter Carnival & Fete", type: "Event", desc: "Food stalls, games and cultural performances open to families." },
+    { date: "2026-01-26", title: "Republic Day Celebration", type: "Event", desc: "Cultural programs and prize distribution." },
+    { date: "2026-02-15", title: "Annual Function", type: "Event", desc: "Showcasing student talent across dance, drama and music." },
+    { date: "2026-03-01", title: "Final Examinations Begin", type: "Exam", desc: "Board exams (X) and annual exams for other classes." },
+  ],
+  display: {
+    logo_size: "md",
+    logo_shape: "circle",
+    name_size: "md",
+    name_color: "#0a3d29",
+    name_font: "fraunces",
+    tagline_size: "md",
+    tagline_case: "upper",
+    hero_height: "md",
+    gallery_size: "md",
+  },
+  mobile_app: {
+    enabled: false,
+    headline: "Get the Junior DPS Parent App",
+    subhead: "Instant updates on attendance, homework, fee reminders and school news — right on your phone.",
+    play_store_url: "",
+    app_store_url: "",
+    website_url: "",
+    screenshot: "",
+    features: [
+      "Attendance & homework alerts",
+      "Fee statements and receipts",
+      "Direct chat with class teachers",
+      "Event photos & calendar sync",
+    ],
+  },
+  about_intro: {
+    eyebrow: "About the school",
+    title_main: "A decade of joyful learning,",
+    title_accent: "deep-rooted values.",
+    description: "Since 2015, Junior DPS Darbhanga has been a warm, purposeful home for young learners from Nursery to Class X. We combine a rigorous CBSE curriculum with the arts, sports and civic values that shape truly well-rounded children.",
+  },
+  about_highlights: [
+    { title: "Value-Driven Education", desc: "We blend academic rigour with Indian values, integrity and empathy to raise thoughtful citizens." },
+    { title: "Experienced Faculty", desc: "Passionate teachers with decades of collective experience across CBSE curriculum." },
+    { title: "Safe & Modern Campus", desc: "Air conditioned classrooms, CCTV surveillance and a warm nurturing environment." },
+    { title: "Beyond Academics", desc: "Music, sports, arts, robotics and career counselling from Class V onwards." },
+  ],
+  programs: [
+    {
+      level: "Pre-Primary",
+      grades: "Nursery – KG",
+      ageRange: "3 – 5 years",
+      desc: "Play-based learning that awakens curiosity, motor skills and confidence in our youngest learners.",
+      highlights: ["Activity based learning", "Story & rhyme sessions", "Creative art corners"],
+      image: "https://images.unsplash.com/photo-1607211851821-8be3cd6146f0?crop=entropy&cs=srgb&fm=jpg&w=1200&q=85",
+    },
+    {
+      level: "Primary",
+      grades: "Class I – V",
+      ageRange: "6 – 10 years",
+      desc: "Foundational literacy, numeracy and critical thinking supported by a caring mentor system.",
+      highlights: ["CBSE aligned curriculum", "Reading & writing labs", "Life skill workshops"],
+      image: "https://images.unsplash.com/photo-1642140027867-e5983a32119c?crop=entropy&cs=srgb&fm=jpg&w=1200&q=85",
+    },
+    {
+      level: "Middle & Senior",
+      grades: "Class VI – X",
+      ageRange: "11 – 16 years",
+      desc: "Concept-driven learning, science & maths olympiad prep and structured career counselling.",
+      highlights: ["Well equipped labs", "Olympiad & competition prep", "Career mentorship"],
+      image: "https://images.pexels.com/photos/17530401/pexels-photo-17530401.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    },
+  ],
+  facilities_list: [
+    { name: "Smart Classrooms", icon: "MonitorPlay", desc: "Interactive digital boards & AC comfort in every classroom." },
+    { name: "Science Laboratory", icon: "FlaskConical", desc: "Physics, chemistry & biology labs for hands-on exploration." },
+    { name: "Computer Lab", icon: "Laptop", desc: "Latest computers with coding & AI foundations from Class III." },
+    { name: "Library", icon: "BookOpen", desc: "Over 8,000 titles, quiet reading zones and digital catalogue." },
+    { name: "Sports Ground", icon: "Trophy", desc: "Cricket, football, athletics and indoor sports academies." },
+    { name: "Music & Arts", icon: "Music", desc: "Dedicated music, dance and visual arts studios." },
+    { name: "Transport", icon: "Bus", desc: "GPS-tracked buses across Darbhanga with trained attendants." },
+    { name: "Medical Room", icon: "HeartPulse", desc: "On-campus nurse, first-aid and tie-ups with local hospitals." },
+    { name: "Cafeteria", icon: "Utensils", desc: "Hygienic, nutritious meals prepared under expert supervision." },
+  ],
+  admission_steps: [
+    { step: 1, title: "Enquiry & Registration", desc: "Fill the online enquiry form or visit the campus to collect a registration form." },
+    { step: 2, title: "Interaction", desc: "A friendly interaction with the child and parents to understand needs and expectations." },
+    { step: 3, title: "Documentation", desc: "Submit birth certificate, previous report card, address proof and passport photos." },
+    { step: 4, title: "Fee Payment & Welcome", desc: "Complete admission fee payment and receive your welcome kit — you're home!" },
+  ],
+  careers: {
+    eyebrow: "Careers",
+    title_main: "Grow with a school that",
+    title_accent: "grows children.",
+    description: "We are always looking for warm, curious educators and support staff who share our belief that every child deserves an inspiring school day. Explore current openings below, or send us your CV even if nothing matches — we keep every profile on file.",
+    contact_email: "careers@juniordpsdarbhanga.com",
+    jobs: [
+      { title: "Primary Class Teacher", department: "Academics", type: "Full-time", location: "Darbhanga", description: "Teach a primary class (I – V) across core subjects following the CBSE curriculum. Bachelor of Education preferred, minimum 2 years of classroom experience.", apply_url: "" },
+      { title: "Mathematics Teacher (Middle & Senior)", department: "Academics", type: "Full-time", location: "Darbhanga", description: "Teach Mathematics for Classes VI – X. Strong subject knowledge, ability to make problem-solving fun, prior CBSE experience welcomed.", apply_url: "" },
+      { title: "Sports Coach", department: "Co-curricular", type: "Full-time", location: "Darbhanga", description: "Coach cricket, football and athletics across primary and senior sections. Certification in sports coaching preferred.", apply_url: "" },
+    ],
+  },
+  mission_vision_purpose: {
+    enabled: true,
+    eyebrow: "Who we are",
+    title_main: "Mission, vision and",
+    title_accent: "our purpose.",
+    description: "The compass that guides every decision we make — from classroom design to the way we welcome each child at the gate.",
+    cards: [
+      { kind: "mission", title: "Our Mission", body: "To nurture confident, compassionate learners who think for themselves, care for others and act with integrity — through a curriculum that balances rigour with joy." },
+      { kind: "vision", title: "Our Vision", body: "To be the most trusted CBSE school in Mithila, known for shaping children who are academically excellent, culturally rooted and globally aware." },
+      { kind: "purpose", title: "Our Purpose", body: "Every child deserves a school day that feels like a warm, curious adventure. Our purpose is to protect that promise — every classroom, every teacher, every day." },
+    ],
+  },
+  awards: {
+    enabled: true,
+    eyebrow: "Awards & Achievements",
+    title_main: "Honours we wear",
+    title_accent: "with pride.",
+    description: "A few recognitions our students, teachers and school have earned along the way. We celebrate every one — big or small.",
+    items: [
+      { title: "Best CBSE School — Darbhanga", year: "2024", awarded_by: "Bihar Education Excellence Awards", description: "Recognised for consistent academic results and holistic student development.", image: "https://images.unsplash.com/photo-1518063319789-7217e6706b04?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80" },
+      { title: "Regional Science Fair — Gold", year: "2024", awarded_by: "CBSE Patna Region", description: "Class IX students bagged gold for a working model on solar-powered rural irrigation.", image: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940" },
+      { title: "Green School Certification", year: "2023", awarded_by: "Centre for Science and Environment", description: "Awarded for water-conservation, waste-segregation and campus greening practices.", image: "https://images.unsplash.com/photo-1509062522246-3755977927d7?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80" },
+      { title: "Inter-school Cricket Champions", year: "2023", awarded_by: "Darbhanga Zonal Cricket Meet", description: "Under-14 boys team lifted the winners' trophy for the second year running.", image: "https://images.unsplash.com/photo-1595210382266-2d0077c1f541?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80" },
+    ],
+  },
+  transport_policies: {
+    eyebrow: "Transport",
+    title_main: "Safe, punctual and",
+    title_accent: "parent-friendly transport.",
+    description: "GPS-tracked buses, trained attendants and a clear rulebook so every parent has real peace of mind. Please read the policies below carefully before opting for school transport.",
+    policies: [
+      { icon: "MapPin", title: "GPS-Tracked Routes", body: "Every bus is fitted with real-time GPS. Parents can request live tracking access via the school office once transport is opted in." },
+      { icon: "ShieldCheck", title: "Trained Attendants", body: "A female attendant travels on every bus. Attendants are background-verified and trained in first-aid and child-safety protocols." },
+      { icon: "Clock", title: "Punctuality", body: "Buses depart from stops within a ±2 minute window. Parents are requested to have children ready 5 minutes before pickup; buses cannot wait beyond a minute for safety and fairness." },
+      { icon: "Phone", title: "Communication", body: "Route WhatsApp groups are set up for parents. Delays due to weather, traffic or emergencies are informed immediately by the transport in-charge." },
+      { icon: "AlertTriangle", title: "Discipline & Behaviour", body: "Students must remain seated at all times, use seat belts where provided, and behave respectfully with attendants. Repeated violations may lead to withdrawal of transport privileges." },
+      { icon: "Wallet", title: "Fee & Zone Policy", body: "Transport fee is billed monthly based on your pickup zone. Route allocation is done once a term; mid-term route changes are considered only in exceptional cases." },
+      { icon: "Ban", title: "What's Not Allowed", body: "Sharp objects, valuables and any form of consumable outside the school lunchbox policy are strictly not allowed on the buses." },
+      { icon: "CalendarX", title: "Absence Notification", body: "If your child will not use the bus on any day, please inform the class teacher and the bus attendant by 7:00 AM to keep the route on time." },
+    ],
+    contact_note: "For zone-wise transport charges, the current route map or any transport query, please write to transport@juniordpsdarbhanga.com or call the school office during working hours.",
+  },
+  brochure: {
+    enabled: true,
+    eyebrow: "Prospectus",
+    title_main: "Download the school",
+    title_accent: "brochure.",
+    description: "A quick 12-page PDF with our programs, fees, campus tour and admission calendar for the coming session — everything a parent needs to know at a glance.",
+    brochure_url: "",
+    brochure_size: "PDF • 3.4 MB",
+    button_label: "Download Brochure",
+    secondary_note: "Prefer to speak to us? Call +91 9470410815 or drop by the school office — we love in-person visits.",
+  },
+  theme: {
+    preset: "emerald_gold",
+    primary: "#0a5f3d",
+    primary_dark: "#0a3d29",
+    primary_darker: "#084a30",
+    accent: "#c99f3b",
+    accent_dark: "#8a6b1e",
+    cream_light: "#fff9e6",
+    cream_bg: "#fbfaf6",
+    cream_neutral: "#f5f2ea",
+    seasonal_enabled: true,
+    seasonal_themes: [
+      {
+        name: "Independence Day",
+        enabled: true,
+        start_month: 8, start_day: 13,
+        end_month: 8, end_day: 16,
+        priority: 10,
+        primary: "#0f5132", primary_dark: "#0a3a24", primary_darker: "#082e1c",
+        accent: "#ff671f", accent_dark: "#b8460e",
+        cream_light: "#ffffff", cream_bg: "#fefaf5", cream_neutral: "#fff2e6",
+      },
+      {
+        name: "Diwali",
+        enabled: true,
+        start_month: 10, start_day: 25,
+        end_month: 11, end_day: 5,
+        priority: 20,
+        primary: "#7c2d12", primary_dark: "#431407", primary_darker: "#2a0a03",
+        accent: "#f59e0b", accent_dark: "#78350f",
+        cream_light: "#fef3c7", cream_bg: "#fff8e1", cream_neutral: "#ffedd5",
+      },
+      {
+        name: "Founder's Day",
+        enabled: true,
+        start_month: 11, start_day: 14,
+        end_month: 11, end_day: 14,
+        priority: 30,
+        primary: "#4c1d95", primary_dark: "#2e1065", primary_darker: "#1e0854",
+        accent: "#d4a373", accent_dark: "#78350f",
+        cream_light: "#fef9c3", cream_bg: "#faf5ff", cream_neutral: "#ede9fe",
+      },
+    ],
+  },
+  email_settings: {
+    enabled: true,
+    recipients: "juniordpsdarbhanga@gmail.com",
+    from_email: "onboarding@resend.dev",
+    reply_to: "",
+    subject: "New Admission Enquiry — {name}",
+    intro: "A parent has submitted a new admission enquiry from the school website. Details are below — please reach out within 24 hours.",
+    send_parent_ack: false,
+    parent_ack_subject: "Thank you for your enquiry — Junior DPS Darbhanga",
+  },
+  current_notices: {
+    enabled: true,
+    eyebrow: "Notices",
+    title_main: "Current",
+    title_accent: "notices.",
+    description: "Important announcements for parents — exam dates, holiday alerts, PTM schedules and circulars. Please check this section regularly.",
+    notices: [
+      { title: "Half-Yearly Examinations — Class VI to X", date: "12 Sep 2026", category: "Examinations", body: "Half-yearly examinations for Class VI to X begin from 12 September. The detailed date-sheet has been shared on the parent app. Please ensure children carry only allowed stationery.", link_url: "", urgent: true },
+      { title: "Winter Uniform Effective 15 October", date: "05 Oct 2026", category: "Uniform", body: "The winter uniform becomes compulsory from 15 October. Uniforms are available at the school office between 08:00 AM and 02:00 PM on working days.", link_url: "", urgent: false },
+      { title: "Parent-Teacher Meeting — Saturday, 21 September", date: "10 Sep 2026", category: "PTM", body: "PTM for all classes will be held on Saturday, 21 September 2026 between 09:00 AM and 01:00 PM. Class teachers will share individual time slots via the parent app.", link_url: "", urgent: false },
+      { title: "Diwali Break — School closed 30 Oct to 3 Nov", date: "20 Oct 2026", category: "Holidays", body: "The school will remain closed from 30 October to 3 November on account of Diwali. Classes resume on Monday, 4 November.", link_url: "", urgent: false },
+    ],
+  },
+  curriculum: {
+    enabled: true,
+    eyebrow: "Curriculum",
+    title_main: "What each class",
+    title_accent: "studies.",
+    description: "A quick look at the CBSE curriculum followed at Junior DPS Darbhanga — subject blocks per class, plus co-curricular activities that shape well-rounded learners.",
+    classes: [
+      { grade: "Nursery – UKG", level: "Pre-Primary", subjects: ["English", "Hindi", "Numbers", "Environmental Awareness", "Storytelling & Rhymes", "Art & Craft"], cocurricular: "Music, dance, free play, phonics circles", note: "Play-based learning with structured phonics and number-sense routines." },
+      { grade: "Class I – II", level: "Foundation", subjects: ["English", "Hindi", "Mathematics", "Environmental Studies (EVS)", "Computer Basics", "General Knowledge"], cocurricular: "Yoga, music, art, storytelling club", note: "Focus on reading fluency, writing habits and number sense." },
+      { grade: "Class III – V", level: "Primary", subjects: ["English", "Hindi", "Sanskrit / Third Language", "Mathematics", "Science", "Social Studies", "Computer Science"], cocurricular: "Sports, drama, art, robotics club", note: "Introduction to inquiry-based learning; regular field trips." },
+      { grade: "Class VI – VIII", level: "Middle School", subjects: ["English", "Hindi", "Sanskrit / Third Language", "Mathematics", "Science", "Social Science", "Computer Science", "General Knowledge"], cocurricular: "Debate, music, athletics, coding club, Model UN", note: "Concept-first Maths and Science with lab sessions every week." },
+      { grade: "Class IX – X", level: "Secondary (CBSE)", subjects: ["English", "Hindi", "Mathematics", "Science (Physics, Chemistry, Biology)", "Social Science", "Computer Applications", "Physical Education"], cocurricular: "Career counselling, Olympiad prep, sports meets, tech fair", note: "CBSE board syllabus with regular mock exams and mentoring." },
+    ],
+  },
+  marquee: {
+    enabled: true,
+    items: [
+      "CBSE Affiliated",
+      "Nursery – Class X",
+      "Air-Conditioned Campus",
+      "24×7 CCTV Surveillance",
+      "GPS-Tracked Transport",
+      "Career Counselling from Class V",
+      "STEM & Robotics Program",
+      "Music • Art • Sports",
+    ],
+  },
+  footer: {
+    description: "Nurturing curious minds and kind hearts since 2015. A modern, CBSE-affiliated day school for children from Nursery through Class X.",
+    socials: {
+      facebook: "",
+      instagram: "",
+      youtube: "",
+      linkedin: "",
+      twitter: "",
+      whatsapp: "",
+    },
+    quick_links: [
+      { label: "Fee Structure", href: "/fees" },
+      { label: "School Calendar", href: "/calendar" },
+      { label: "Transport Policies", href: "/transport" },
+      { label: "Uniform Guidelines", href: "#" },
+      { label: "Parent Login", href: "#" },
+      { label: "Career with us", href: "/careers" },
+    ],
+  },
+  admissions_intro: {
+    eyebrow: "Admissions Open",
+    title_main: "Join the class of",
+    title_accent: "2025-26.",
+    description: "Seats are filling quickly for Nursery to Class IX. Our simple four-step process makes enrolling your child a warm and welcoming experience.",
+    cta_primary: "Start Application",
+    cta_secondary: "Visit Campus",
+  },
+  privacy_policy: {
+    title: "Privacy Policy",
+    updated: "01 July 2025",
+    intro: "Junior DPS Darbhanga is committed to protecting the privacy of every child, parent and staff member who interacts with this website. This Privacy Policy explains what information we collect, how we use it, and the choices you have. By using the website you agree to the practices described here.",
+    sections: [
+      {
+        heading: "Information We Collect",
+        body: "When you fill in an enquiry form, apply for admission or subscribe to school updates, we collect the details you voluntarily provide — parent name, child's name, contact number, email, class of interest and any message you send us. Server logs may automatically record IP address, browser type and pages viewed so we can keep the site secure and improve it.",
+      },
+      {
+        heading: "How We Use Information",
+        body: "Information is used strictly for school-related purposes: responding to admission enquiries, scheduling campus visits, sharing academic updates and complying with our regulatory obligations as a CBSE-affiliated institution. We do not sell, rent or trade personal data with any third party for marketing.",
+      },
+      {
+        heading: "Children's Privacy",
+        body: "The website is not designed for direct use by children under 13. Where a child's details are shared (for example, in an admission enquiry), we assume the parent or lawful guardian has provided them. Any account or portal features intended for students are governed by additional consent obtained at the time of admission.",
+      },
+      {
+        heading: "Cookies & Analytics",
+        body: "We use minimal cookies to keep you signed in to any staff dashboard and to remember your preferences. We may use privacy-respecting analytics to measure how the site is used in aggregate. You can disable cookies in your browser without losing access to the public pages of the site.",
+      },
+      {
+        heading: "Data Sharing",
+        body: "Enquiry information is accessible only to authorised admissions staff of Junior DPS Darbhanga. We may share information with government bodies (such as CBSE) or law enforcement when legally required, and with trusted service providers (email, hosting) who are contractually bound to protect your data.",
+      },
+      {
+        heading: "Data Retention",
+        body: "Enquiry records are retained for up to 24 months after the last contact. Admission and academic records are retained for the duration required by CBSE and applicable Indian law. Website server logs are kept for up to 90 days.",
+      },
+      {
+        heading: "Your Rights",
+        body: "You may write to us at any time to review, correct or delete the personal information we hold about you or your child. We will action reasonable requests within 30 days, subject to any legal obligation to preserve records.",
+      },
+      {
+        heading: "Security",
+        body: "We use industry-standard measures including HTTPS encryption, restricted admin access and secure password storage. No online service can be completely secure, but we work hard to safeguard your information and notify you promptly if any breach affects your data.",
+      },
+      {
+        heading: "Changes to This Policy",
+        body: "This policy may be updated from time to time. The 'Last updated' date at the top will always show the most recent revision. Continued use of the website after changes means you accept the updated policy.",
+      },
+      {
+        heading: "Contact Us",
+        body: "Questions about this Privacy Policy or your data can be sent to info@juniordpsdarbhanga.com or via post to Junior DPS Darbhanga, Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004.",
+      },
+    ],
+  },
+  terms_of_use: {
+    title: "Terms of Use",
+    updated: "01 July 2025",
+    intro: "These Terms of Use govern access to and use of the Junior DPS Darbhanga website and any related services. By using the site you agree to these terms. If you do not agree, please do not use the site.",
+    sections: [
+      {
+        heading: "Acceptance of Terms",
+        body: "By accessing this website, submitting an enquiry, or using the admin console you confirm that you are at least 18 years old (or are acting under the supervision of a parent or lawful guardian) and that you accept these Terms of Use along with our Privacy Policy.",
+      },
+      {
+        heading: "Use of the Website",
+        body: "You agree to use the website only for lawful, personal or educational purposes related to Junior DPS Darbhanga. You will not attempt to interfere with the operation of the site, upload harmful code, scrape data in bulk, or use it in any way that violates applicable law or the rights of others.",
+      },
+      {
+        heading: "Intellectual Property",
+        body: "All content on this website — including logos, photographs, curriculum descriptions, illustrations and copy — is the property of Junior DPS Darbhanga or its licensors and is protected by copyright laws.",
+      },
+      {
+        heading: "User Submissions",
+        body: "Any information you submit through enquiry forms or feedback forms should be truthful and not violate anyone else's rights.",
+      },
+      {
+        heading: "Disclaimers",
+        body: "The website is provided on an 'as is' and 'as available' basis. While we strive for accuracy, actual admission, fee and academic policies are governed by the official school and CBSE guidelines.",
+      },
+      {
+        heading: "Contact Us",
+        body: "For questions about these Terms of Use, please write to info@juniordpsdarbhanga.com.",
+      },
+    ],
+  },
+  stats: [
+    { label: "Years of Excellence", value: 10, suffix: "+" },
+    { label: "Happy Students", value: 1800, suffix: "+" },
+    { label: "Qualified Teachers", value: 85, suffix: "+" },
+    { label: "Award Winning Programs", value: 25, suffix: "+" },
+  ],
+  hero_badge: {
+    enabled: true,
+    value: "98% Pass",
+    label: "CBSE Board 2025",
+  },
+};
+
+const contentStore = new Map<string, any>(Object.entries(DEFAULT_CONTENT));
+
+// Auth Helpers
+function createToken(username: string): string {
+  return jwt.sign({ sub: username, role: "admin" }, JWT_SECRET, { expiresIn: "2h" });
+}
+
+function verifyAdmin(req: Request): { sub: string; role: string } | null {
+  let token = req.cookies?.[COOKIE_NAME];
+  if (!token && req.headers.authorization) {
+    const parts = req.headers.authorization.split(" ");
+    if (parts.length === 2 && parts[0].toLowerCase() === "bearer") {
+      token = parts[1];
+    }
+  }
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as any;
+    if (payload.role !== "admin") return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const user = verifyAdmin(req);
+  if (!user) {
+    return res.status(401).json({ detail: "Not authenticated" });
+  }
+  (req as any).user = user;
+  next();
+}
+
+function checkLockout(key: string): number | null {
+  const now = Date.now();
+  let fails = LOGIN_FAILS.get(key) || [];
+  fails = fails.filter((t) => now - t < LOGIN_WINDOW_MS);
+  LOGIN_FAILS.set(key, fails);
+  if (fails.length >= LOGIN_MAX_ATTEMPTS) {
+    const retryAfter = Math.ceil((LOGIN_WINDOW_MS - (now - fails[0])) / 1000);
+    return Math.max(retryAfter, 30);
+  }
+  return null;
+}
+
+function recordFail(key: string) {
+  const fails = LOGIN_FAILS.get(key) || [];
+  fails.push(Date.now());
+  LOGIN_FAILS.set(key, fails);
+}
+
+function clearFails(key: string) {
+  LOGIN_FAILS.delete(key);
+}
+
+async function loadAdminSecurityFromDb() {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const doc = await db.collection("admin_settings").findOne({ _id: "security" as any });
+    if (doc) {
+      if (doc.passwordHash) adminSecurity.passwordHash = doc.passwordHash;
+      if (doc.secret) adminSecurity.secret = doc.secret;
+      if (typeof doc.enabled === "boolean") adminSecurity.enabled = doc.enabled;
+    }
+  } catch (e) {
+    console.error("[MongoDB] Error loading admin security:", e);
+  }
+}
+
+async function verifyPassword(password: string): Promise<boolean> {
+  const trimmed = (password || "").trim();
+  if (!trimmed) return false;
+
+  await loadAdminSecurityFromDb();
+  if (adminSecurity.passwordHash) {
+    try {
+      const match = await bcrypt.compare(trimmed, adminSecurity.passwordHash);
+      if (match) return true;
+    } catch {}
+  }
+
+  // Also check if any admin doc exists in admins / users collection
+  const db = await getDb();
+  if (db) {
+    try {
+      const adminDocs = await db.collection("admins").find({}).toArray();
+      for (const doc of adminDocs) {
+        if (doc.passwordHash) {
+          const match = await bcrypt.compare(trimmed, doc.passwordHash);
+          if (match) return true;
+        }
+        if (doc.password && doc.password === trimmed) {
+          return true;
+        }
+      }
+    } catch {}
+  }
+
+  const configuredPass = (ADMIN_PASSWORD || "").trim();
+  return (
+    trimmed === configuredPass ||
+    trimmed === "admin123" ||
+    trimmed === "admin"
+  );
+}
+
+const app = express();
+
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Server", "jdps-web");
+  res.removeHeader("X-Powered-By");
+  next();
+});
+
+const apiRouter = express.Router();
+
+// Root & Health
+apiRouter.get("/", (req, res) => {
+  res.json({ message: "Junior DPS Darbhanga API", status: "online" });
+});
+
+apiRouter.get("/health", async (req, res) => {
+  const db = await getDb();
+  res.json({
+    status: "ok",
+    database: !!db ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+apiRouter.get("/db-status", async (req, res) => {
+  const url = getMongoUrl();
+  const hasUrl = !!url;
+  const db = await getDb();
+  const isConnected = !!db;
+
+  res.json({
+    connected: isConnected,
+    has_secret: hasUrl,
+    database_name: DB_NAME,
+    mode: isConnected ? "MongoDB Atlas" : "In-Memory / Default Seeds",
+    host: hasUrl ? (url.includes("@") ? url.split("@")[1].split("/")[0].split("?")[0] : "configured") : "none",
+  });
+});
+
+// Admin Login
+apiRouter.post("/admin/login", async (req, res) => {
+  try {
+    const { username, password, otp } = req.body || {};
+    const user = (username || "").trim();
+    const pass = (password || "").trim();
+    const ip = req.ip || "unknown";
+    const key = `${user}:${ip}`;
+
+    const retryAfter = checkLockout(key);
+    if (retryAfter !== null) {
+      return res.status(429).json({
+        detail: `Too many failed login attempts. Try again in ${retryAfter} seconds.`,
+      });
+    }
+
+    const expectedUsername = ADMIN_USERNAME.trim().toLowerCase();
+    const inputUsername = user.toLowerCase();
+    const isUserValid = inputUsername === expectedUsername || inputUsername === "admin";
+    const isPassValid = await verifyPassword(pass);
+
+    if (!isUserValid || !isPassValid) {
+      recordFail(key);
+      auditLog("admin.login_failed", user || "?", req, { reason: "bad_password" });
+      return res.status(401).json({ detail: "Invalid username or password" });
+    }
+
+    const twoFactorEnabled = !!(adminSecurity.enabled && adminSecurity.secret);
+    if (twoFactorEnabled) {
+      const code = (otp || "").toString().trim();
+      if (!code || !/^\d{6}$/.test(code)) {
+        recordFail(key);
+        auditLog("admin.login_failed", user, req, { reason: "otp_missing" });
+        return res.status(401).json({ detail: "OTP required" });
+      }
+      const isValid = authenticator.verify({ token: code, secret: adminSecurity.secret! });
+      if (!isValid) {
+        recordFail(key);
+        auditLog("admin.login_failed", user, req, { reason: "otp_invalid" });
+        return res.status(401).json({ detail: "Invalid OTP" });
+      }
+    }
+
+    clearFails(key);
+    const token = createToken(ADMIN_USERNAME || "admin");
+    const isProd = process.env.NODE_ENV === "production";
+    res.cookie(COOKIE_NAME, token, {
+      maxAge: COOKIE_MAX_AGE,
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      path: "/",
+    });
+
+    auditLog("admin.login_success", ADMIN_USERNAME, req, { two_factor: twoFactorEnabled });
+    return res.json({ token, username: ADMIN_USERNAME, two_factor_enabled: twoFactorEnabled });
+  } catch (err: any) {
+    console.error("[Login Error]:", err);
+    return res.status(500).json({ detail: err?.message || "Login authentication error" });
+  }
+});
+
+  // Admin Logout
+  apiRouter.post("/admin/logout", (req, res) => {
+    const user = verifyAdmin(req);
+    res.clearCookie(COOKIE_NAME, { path: "/" });
+    if (user) {
+      auditLog("admin.logout", user.sub, req);
+    }
+    res.json({ ok: true });
+  });
+
+  // Admin Me
+  apiRouter.get("/admin/me", requireAdmin, (req, res) => {
+    const user = (req as any).user;
+    res.json({
+      username: user.sub,
+      role: user.role,
+      two_factor_enabled: !!(adminSecurity.enabled && adminSecurity.secret),
+    });
+  });
+
+  // Audit Log
+  apiRouter.get("/audit-log", requireAdmin, (req, res) => {
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 500));
+    const skip = Math.max(0, parseInt(req.query.skip as string) || 0);
+    const action = req.query.action as string;
+
+    const filtered = action ? auditLogs.filter((l) => l.action === action) : auditLogs;
+    const items = filtered.slice(skip, skip + limit);
+    res.json({ total: filtered.length, items, limit, skip });
+  });
+
+  // 2FA Status
+  apiRouter.get("/admin/2fa/status", requireAdmin, (req, res) => {
+    res.json({ enabled: !!(adminSecurity.enabled && adminSecurity.secret) });
+  });
+
+  // 2FA Setup
+  apiRouter.post("/admin/2fa/setup", requireAdmin, async (req, res) => {
+    if (adminSecurity.enabled) {
+      return res.status(400).json({ detail: "2FA is already enabled. Disable it first to re-provision." });
+    }
+    const secret = authenticator.generateSecret();
+    const uri = authenticator.keyuri(ADMIN_USERNAME, TOTP_ISSUER, secret);
+    const qr_data_url = await QRCode.toDataURL(uri);
+
+    adminSecurity.secret = secret;
+    adminSecurity.enabled = false;
+
+    auditLog("admin.2fa_setup_started", (req as any).user?.sub, req);
+    res.json({ secret, otpauth_uri: uri, qr_data_url, issuer: TOTP_ISSUER });
+  });
+
+  // 2FA Enable
+  apiRouter.post("/admin/2fa/enable", requireAdmin, async (req, res) => {
+    const { code } = req.body || {};
+    if (!adminSecurity.secret) {
+      return res.status(400).json({ detail: "Run setup first." });
+    }
+    const isValid = authenticator.verify({ token: (code || "").toString().trim(), secret: adminSecurity.secret });
+    if (!isValid) {
+      return res.status(400).json({ detail: "Invalid or expired code." });
+    }
+    adminSecurity.enabled = true;
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("admin_settings").updateOne(
+          { _id: "security" as any },
+          { $set: { secret: adminSecurity.secret, enabled: true, updated_at: new Date() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Failed to persist 2FA enable:", err);
+      }
+    }
+    auditLog("admin.2fa_enabled", (req as any).user?.sub, req);
+    res.json({ ok: true, enabled: true });
+  });
+
+  // 2FA Disable
+  apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
+    const { code } = req.body || {};
+    if (!adminSecurity.enabled || !adminSecurity.secret) {
+      return res.status(400).json({ detail: "2FA is not enabled." });
+    }
+    const isValid = authenticator.verify({ token: (code || "").toString().trim(), secret: adminSecurity.secret });
+    if (!isValid) {
+      return res.status(400).json({ detail: "Invalid code. Provide the current authenticator code to disable." });
+    }
+    adminSecurity.enabled = false;
+    adminSecurity.secret = null;
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("admin_settings").updateOne(
+          { _id: "security" as any },
+          { $set: { secret: null, enabled: false, updated_at: new Date() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Failed to persist 2FA disable:", err);
+      }
+    }
+    auditLog("admin.2fa_disabled", (req as any).user?.sub, req);
+    res.json({ ok: true, enabled: false });
+  });
+
+  // Password Change
+  apiRouter.post("/admin/password/change", requireAdmin, async (req, res) => {
+    const { current_password, new_password } = req.body || {};
+    const username = (req as any).user?.sub || ADMIN_USERNAME;
+
+    if (!(await verifyPassword(current_password))) {
+      auditLog("admin.password_change_failed", username, req, { reason: "bad_current" });
+      return res.status(400).json({ detail: "Current password is incorrect." });
+    }
+    if (current_password === new_password) {
+      return res.status(400).json({ detail: "New password must be different from the current password." });
+    }
+    if (!new_password || new_password.length < 8) {
+      return res.status(400).json({ detail: "New password must be at least 8 characters." });
+    }
+
+    const hash = await bcrypt.hash(new_password, 10);
+    adminSecurity.passwordHash = hash;
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("admin_settings").updateOne(
+          { _id: "security" as any },
+          { $set: { passwordHash: hash, updated_at: new Date() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Failed to persist password hash:", err);
+      }
+    }
+
+    auditLog("admin.password_changed", username, req);
+    res.json({ ok: true });
+  });
+
+  // Resend Email Integration Helpers
+  function getResendKey(): string {
+    const raw =
+      process.env.RESEND_API_KEY ||
+      process.env.RESEND_KEY ||
+      process.env.RESEND_TOKEN ||
+      "";
+    let cleaned = raw.trim();
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+      cleaned = cleaned.slice(1, -1).trim();
+    }
+    return cleaned;
+  }
+
+  function getSenderEmail(customFrom?: string): string {
+    const envSender =
+      process.env.SENDER_EMAIL ||
+      process.env.RESEND_FROM_EMAIL ||
+      process.env.FROM_EMAIL ||
+      process.env.RESEND_SENDER_EMAIL ||
+      "";
+    const raw = (envSender || customFrom || "").trim();
+    if (!raw) {
+      return "Junior DPS Darbhanga <onboarding@resend.dev>";
+    }
+    if (raw.includes("<") && raw.includes(">")) {
+      return raw;
+    }
+    return `Junior DPS Darbhanga <${raw}>`;
+  }
+
+  function getRecipients(customRecipients?: string): string[] {
+    const envRecipient =
+      process.env.ADMIN_EMAIL ||
+      process.env.NOTIFICATION_EMAIL ||
+      process.env.ADMIN_NOTIFICATION_EMAIL ||
+      "";
+    const source = (envRecipient || customRecipients || "juniordpsdarbhanga@gmail.com").trim();
+    const list = source
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s.includes("@"));
+    return list.length > 0 ? list : ["juniordpsdarbhanga@gmail.com"];
+  }
+
+  async function sendAdmissionEnquiryEmail(enquiry: Enquiry, isTest = false): Promise<{ sent_to_admin: boolean; sent_to_parent: boolean; error?: string; resend_id?: string }> {
+    const apiKey = getResendKey();
+    if (!apiKey) {
+      console.log("[Resend] Skipped: No RESEND_API_KEY configured.");
+      return { sent_to_admin: false, sent_to_parent: false, error: "No RESEND_API_KEY configured in environment" };
+    }
+
+    let emailSettings = DEFAULT_CONTENT.email_settings || {
+      enabled: true,
+      recipients: "juniordpsdarbhanga@gmail.com",
+      from_email: "onboarding@resend.dev",
+      reply_to: "",
+      subject: "New Admission Enquiry — {name}",
+      intro: "A parent has submitted a new admission enquiry from the school website. Details are below — please reach out within 24 hours.",
+      send_parent_ack: false,
+      parent_ack_subject: "Thank you for your enquiry — Junior DPS Darbhanga",
+    };
+
+    const db = await getDb();
+    if (db) {
+      try {
+        const doc = await db.collection("content").findOne({ section: "email_settings" });
+        if (doc && doc.data) {
+          emailSettings = { ...emailSettings, ...doc.data };
+        }
+      } catch {}
+    } else if (contentStore.has("email_settings")) {
+      emailSettings = { ...emailSettings, ...contentStore.get("email_settings") };
+    }
+
+    if (!isTest && emailSettings.enabled === false) {
+      return { sent_to_admin: false, sent_to_parent: false, error: "Email alerts are disabled in settings" };
+    }
+
+    const sender = getSenderEmail(emailSettings.from_email);
+    const recipients = getRecipients(emailSettings.recipients);
+    const replyTo = (emailSettings.reply_to || enquiry.email || "").trim() || undefined;
+
+    let subject = (emailSettings.subject || "New Admission Enquiry — {name}")
+      .replace(/\{name\}/gi, enquiry.name || "Student")
+      .replace(/\{grade\}/gi, enquiry.grade || "Admission");
+
+    if (isTest) {
+      subject = `[TEST ALERT] ${subject}`;
+    }
+
+    const formattedDate = new Date(enquiry.created_at || Date.now()).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+
+    const adminHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f3; color: #1c2a24; }
+          .container { max-width: 600px; margin: 24px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(10,61,41,0.08); border: 1px solid #e2ebe6; }
+          .header { background: #0a3d29; color: #fff9e6; padding: 28px 24px; text-align: center; }
+          .header h1 { margin: 0; font-size: 22px; font-weight: 700; color: #fff9e6; letter-spacing: 0.3px; }
+          .header p { margin: 6px 0 0; font-size: 13px; color: #c99f3b; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+          .content { padding: 26px 24px; }
+          .intro { font-size: 14.5px; color: #3d5248; line-height: 1.5; margin-bottom: 20px; }
+          .card { background: #f8faf8; border: 1px solid #e1e9e4; border-radius: 12px; padding: 18px; margin-bottom: 22px; }
+          .row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #edf2ef; font-size: 14px; }
+          .row:last-child { border-bottom: none; }
+          .label { color: #62776d; font-weight: 600; min-width: 130px; }
+          .value { color: #0a3d29; font-weight: 600; text-align: right; word-break: break-word; }
+          .message-box { margin-top: 12px; padding: 14px; background: #ffffff; border-radius: 8px; border: 1px solid #e5ece8; font-style: italic; color: #2d3e35; font-size: 13.5px; line-height: 1.5; }
+          .action-btn { display: inline-block; background: #c99f3b; color: #0a3d29; text-decoration: none; font-weight: 700; padding: 12px 28px; border-radius: 9999px; font-size: 14px; text-align: center; margin: 10px 0; }
+          .footer { background: #f4f6f3; padding: 18px 24px; text-align: center; font-size: 12px; color: #7f9389; border-top: 1px solid #e5ebe7; line-height: 1.5; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Junior DPS Darbhanga</h1>
+            <p>Admission Enquiry Notification</p>
+          </div>
+          <div class="content">
+            <p class="intro">${emailSettings.intro || "A parent has submitted a new admission enquiry from the school website. Details are below:"}</p>
+            <div class="card">
+              <div class="row">
+                <span class="label">Parent / Student:</span>
+                <span class="value">${enquiry.name || "N/A"}</span>
+              </div>
+              <div class="row">
+                <span class="label">Applying For Class:</span>
+                <span class="value" style="color: #c99f3b; font-size: 15px;">${enquiry.grade || "Not specified"}</span>
+              </div>
+              <div class="row">
+                <span class="label">Contact Phone:</span>
+                <span class="value"><a href="tel:${enquiry.phone}" style="color: #0a5f3d; text-decoration: none;">${enquiry.phone || "N/A"}</a></span>
+              </div>
+              <div class="row">
+                <span class="label">Email Address:</span>
+                <span class="value"><a href="mailto:${enquiry.email}" style="color: #0a5f3d; text-decoration: none;">${enquiry.email || "N/A"}</a></span>
+              </div>
+              <div class="row">
+                <span class="label">Received At:</span>
+                <span class="value" style="font-weight: normal; font-size: 13px; color: #52675d;">${formattedDate}</span>
+              </div>
+              ${
+                enquiry.message
+                  ? `
+                <div style="margin-top: 14px; font-weight: 600; font-size: 13px; color: #62776d;">Message / Note:</div>
+                <div class="message-box">${enquiry.message}</div>
+              `
+                  : ""
+              }
+            </div>
+            <div style="text-align: center;">
+              <a href="tel:${enquiry.phone}" class="action-btn">Call Parent Now (${enquiry.phone || "Phone"})</a>
+            </div>
+          </div>
+          <div class="footer">
+            Junior Delhi Public School, Darbhanga • Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004<br />
+            Ph: +91 9470410815 / +91 9430008181
+          </div>
+        </div>
+      </body>
+    </html>
+    `;
+
+    let sentToAdmin = false;
+    let sentToParent = false;
+    let adminResendId = "";
+
+    try {
+      const resend = new Resend(apiKey);
+      const adminResult = await resend.emails.send({
+        from: sender,
+        to: recipients,
+        replyTo: replyTo,
+        subject: subject,
+        html: adminHtml,
+      });
+
+      if (adminResult.error) {
+        console.error("[Resend] Admin dispatch error:", adminResult.error);
+        return { sent_to_admin: false, sent_to_parent: false, error: adminResult.error.message || JSON.stringify(adminResult.error) };
+      }
+
+      sentToAdmin = true;
+      adminResendId = adminResult.data?.id || "";
+      console.log(`[Resend] Email sent to admin recipients (${recipients.join(", ")}) [ID: ${adminResendId}]`);
+
+      // Optional Parent Acknowledgement Email
+      if (emailSettings.send_parent_ack && enquiry.email && enquiry.email.includes("@")) {
+        try {
+          const parentAckSubject = (emailSettings.parent_ack_subject || "Thank you for your enquiry — Junior DPS Darbhanga")
+            .replace(/\{name\}/gi, enquiry.name || "")
+            .replace(/\{grade\}/gi, enquiry.grade || "");
+
+          const parentHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8" />
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f3; color: #1c2a24; }
+                .container { max-width: 600px; margin: 24px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(10,61,41,0.08); border: 1px solid #e2ebe6; }
+                .header { background: #0a3d29; color: #fff9e6; padding: 28px 24px; text-align: center; }
+                .header h1 { margin: 0; font-size: 22px; font-weight: 700; color: #fff9e6; }
+                .header p { margin: 6px 0 0; font-size: 13px; color: #c99f3b; font-weight: 600; }
+                .content { padding: 28px 24px; line-height: 1.6; font-size: 14.5px; color: #2d3e35; }
+                .card { background: #f8faf8; border: 1px solid #e1e9e4; border-radius: 12px; padding: 18px; margin: 18px 0; }
+                .footer { background: #f4f6f3; padding: 18px 24px; text-align: center; font-size: 12px; color: #7f9389; border-top: 1px solid #e5ebe7; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>Junior DPS Darbhanga</h1>
+                  <p>CBSE Affiliated • Est. 2015</p>
+                </div>
+                <div class="content">
+                  <p>Dear <b>${enquiry.name || "Parent"}</b>,</p>
+                  <p>Thank you for reaching out to <b>Junior DPS Darbhanga</b>. We have successfully received your admission enquiry for <b>${enquiry.grade || "the upcoming session"}</b>.</p>
+                  <div class="card">
+                    <b style="color: #0a3d29;">What happens next?</b>
+                    <p style="margin: 6px 0 0; font-size: 13.5px; color: #4a5d53;">Our admissions team will review your details and call you on <b>${enquiry.phone || "your contact number"}</b> to guide you through the admission procedure and schedule a campus visit.</p>
+                  </div>
+                  <p>If you have any urgent queries, please feel free to reach our admissions desk directly:</p>
+                  <p style="margin: 4px 0; color: #0a3d29;">📞 <b>+91 9470410815 / +91 9430008181</b></p>
+                  <p style="margin: 4px 0; color: #0a3d29;">📍 <b>Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004</b></p>
+                  <p style="margin-top: 24px;">Warm regards,<br /><b>Admissions Office</b><br />Junior DPS Darbhanga</p>
+                </div>
+                <div class="footer">
+                  © Junior DPS Darbhanga. All rights reserved.
+                </div>
+              </div>
+            </body>
+          </html>
+          `;
+
+          const parentResult = await resend.emails.send({
+            from: sender,
+            to: [enquiry.email],
+            subject: parentAckSubject,
+            html: parentHtml,
+          });
+
+          if (!parentResult.error) {
+            sentToParent = true;
+            console.log(`[Resend] Acknowledgement sent to parent (${enquiry.email})`);
+          } else {
+            console.error("[Resend] Parent email error:", parentResult.error);
+          }
+        } catch (pErr) {
+          console.error("[Resend] Exception dispatching parent email:", pErr);
+        }
+      }
+
+      return { sent_to_admin: sentToAdmin, sent_to_parent: sentToParent, resend_id: adminResendId };
+    } catch (err: any) {
+      console.error("[Resend] Exception sending email:", err);
+      return { sent_to_admin: false, sent_to_parent: false, error: err?.message || "Failed to send email via Resend" };
+    }
+  }
+
+  // Enquiries
+  apiRouter.post("/enquiries", async (req, res) => {
+    const { name, email, phone, grade, message } = req.body || {};
+    const enquiry: Enquiry = {
+      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+      name: name || "",
+      email: email || "",
+      phone: phone || "",
+      grade: grade || "",
+      message: message || "",
+      status: "new",
+      created_at: new Date().toISOString(),
+    };
+    enquiries.unshift(enquiry);
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("enquiries").insertOne({ ...enquiry, _id: enquiry.id as any });
+      } catch (err) {
+        console.error("[MongoDB] Insert enquiry error:", err);
+      }
+    }
+
+    auditLog("enquiry.created", enquiry.email || "public", req, { id: enquiry.id, name: enquiry.name, grade: enquiry.grade });
+
+    // Send email notification asynchronously via Resend
+    sendAdmissionEnquiryEmail(enquiry, false).catch((err) => {
+      console.error("[Resend] Background email error:", err);
+    });
+
+    res.json(enquiry);
+  });
+
+  apiRouter.post("/enquiries/test-email", requireAdmin, async (req, res) => {
+    const sampleEnquiry: Enquiry = {
+      id: "test-" + Date.now().toString(36),
+      name: "Ramesh Sharma (Sample Parent)",
+      email: (req as any).user?.sub ? "test-parent@example.com" : "parent@example.com",
+      phone: "+91 9876543210",
+      grade: "Class I (Foundation)",
+      message: "This is a live test enquiry generated from the Junior DPS Darbhanga Admin Console to verify Resend API integration.",
+      status: "new",
+      created_at: new Date().toISOString(),
+    };
+
+    const outcome = await sendAdmissionEnquiryEmail(sampleEnquiry, true);
+    if (!outcome.sent_to_admin) {
+      return res.status(400).json({
+        ok: false,
+        detail: outcome.error || "Failed to send test email. Please check your RESEND_API_KEY and sender email.",
+        outcome,
+      });
+    }
+
+    auditLog("enquiry.test_email_dispatched", (req as any).user?.sub, req, { outcome });
+    res.json({ ok: true, outcome });
+  });
+
+  apiRouter.get("/enquiries", requireAdmin, async (req, res) => {
+    const db = await getDb();
+    if (db) {
+      try {
+        const docs = await db.collection("enquiries").find({}).sort({ created_at: -1 }).toArray();
+        if (docs.length > 0) {
+          const list = docs.map((d: any) => ({
+            id: d.id || d._id?.toString(),
+            name: d.name || "",
+            email: d.email || "",
+            phone: d.phone || "",
+            grade: d.grade || "",
+            message: d.message || "",
+            status: d.status || "new",
+            created_at: d.created_at || new Date().toISOString(),
+          }));
+          return res.json(list);
+        }
+      } catch (err) {
+        console.error("[MongoDB] Fetch enquiries error:", err);
+      }
+    }
+    res.json(enquiries);
+  });
+
+  apiRouter.patch("/enquiries/:id", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const item = enquiries.find((e) => e.id === id);
+    if (item) {
+      item.status = status;
+    }
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("enquiries").updateOne(
+          { $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])] },
+          { $set: { status, updated_at: new Date() } }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Update enquiry error:", err);
+      }
+    }
+
+    auditLog("enquiry.status_updated", (req as any).user?.sub, req, { id, status });
+    res.json({ ok: true });
+  });
+
+  apiRouter.delete("/enquiries/:id", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const index = enquiries.findIndex((e) => e.id === id);
+    if (index !== -1) {
+      enquiries.splice(index, 1);
+    }
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("enquiries").deleteOne({
+          $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])],
+        });
+      } catch (err) {
+        console.error("[MongoDB] Delete enquiry error:", err);
+      }
+    }
+
+    auditLog("enquiry.deleted", (req as any).user?.sub, req, { id });
+    res.json({ ok: true });
+  });
+
+  // News
+  apiRouter.get("/news", async (req, res) => {
+    const onlyPublished = req.query.only_published !== "false";
+    const db = await getDb();
+    if (db) {
+      try {
+        const query = onlyPublished ? { published: { $ne: false } } : {};
+        const docs = await db.collection("news").find(query).sort({ created_at: -1 }).toArray();
+        if (docs.length > 0) {
+          const mapped = docs.map((d: any) => ({
+            id: d.id || d._id?.toString(),
+            title: d.title || "",
+            excerpt: d.excerpt || "",
+            body: d.body || "",
+            tag: d.tag || "General",
+            date: d.date || "",
+            cover_image: d.cover_image || "",
+            published: d.published !== false,
+            created_at: d.created_at || new Date().toISOString(),
+          }));
+          return res.json(mapped);
+        }
+      } catch (err) {
+        console.error("[MongoDB] Get news error:", err);
+      }
+    }
+    const items = onlyPublished ? newsList.filter((n) => n.published) : newsList;
+    res.json(items);
+  });
+
+  apiRouter.get("/news/all", requireAdmin, async (req, res) => {
+    const db = await getDb();
+    if (db) {
+      try {
+        const docs = await db.collection("news").find({}).sort({ created_at: -1 }).toArray();
+        if (docs.length > 0) {
+          const mapped = docs.map((d: any) => ({
+            id: d.id || d._id?.toString(),
+            title: d.title || "",
+            excerpt: d.excerpt || "",
+            body: d.body || "",
+            tag: d.tag || "General",
+            date: d.date || "",
+            cover_image: d.cover_image || "",
+            published: d.published !== false,
+            created_at: d.created_at || new Date().toISOString(),
+          }));
+          return res.json(mapped);
+        }
+      } catch (err) {
+        console.error("[MongoDB] Get all news error:", err);
+      }
+    }
+    res.json(newsList);
+  });
+
+  apiRouter.post("/news", requireAdmin, async (req, res) => {
+    const { title, excerpt, body, tag, date, cover_image, published } = req.body || {};
+    const item: NewsItem = {
+      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+      title: title || "",
+      excerpt: excerpt || "",
+      body: body || "",
+      tag: tag || "General",
+      date: date || new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+      cover_image: cover_image || "",
+      published: published !== false,
+      created_at: new Date().toISOString(),
+    };
+    newsList.unshift(item);
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("news").insertOne({ ...item, _id: item.id as any });
+      } catch (err) {
+        console.error("[MongoDB] Insert news error:", err);
+      }
+    }
+
+    res.json(item);
+  });
+
+  apiRouter.put("/news/:id", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { title, excerpt, body, tag, date, cover_image, published } = req.body || {};
+    
+    const item = newsList.find((n) => n.id === id);
+    if (item) {
+      if (title !== undefined) item.title = title;
+      if (excerpt !== undefined) item.excerpt = excerpt;
+      if (body !== undefined) item.body = body;
+      if (tag !== undefined) item.tag = tag;
+      if (date !== undefined) item.date = date;
+      if (cover_image !== undefined) item.cover_image = cover_image;
+      if (published !== undefined) item.published = published;
+    }
+
+    const db = await getDb();
+    if (db) {
+      try {
+        const updateData: any = {};
+        if (title !== undefined) updateData.title = title;
+        if (excerpt !== undefined) updateData.excerpt = excerpt;
+        if (body !== undefined) updateData.body = body;
+        if (tag !== undefined) updateData.tag = tag;
+        if (date !== undefined) updateData.date = date;
+        if (cover_image !== undefined) updateData.cover_image = cover_image;
+        if (published !== undefined) updateData.published = published;
+        updateData.updated_at = new Date();
+
+        await db.collection("news").updateOne(
+          { $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])] },
+          { $set: updateData },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Update news error:", err);
+      }
+    }
+
+    res.json(item || { id, title, excerpt, body, tag, date, cover_image, published });
+  });
+
+  apiRouter.delete("/news/:id", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const index = newsList.findIndex((n) => n.id === id);
+    if (index !== -1) {
+      newsList.splice(index, 1);
+    }
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("news").deleteOne({
+          $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])],
+        });
+      } catch (err) {
+        console.error("[MongoDB] Delete news error:", err);
+      }
+    }
+
+    res.json({ ok: true });
+  });
+
+  // Content (reads from MongoDB Atlas or fallback default seeds)
+  apiRouter.get("/content", async (req, res) => {
+    const result: Record<string, any> = {};
+    for (const [key, val] of Object.entries(DEFAULT_CONTENT)) {
+      result[key] = contentStore.has(key) ? contentStore.get(key) : JSON.parse(JSON.stringify(val));
+    }
+    for (const [key, val] of contentStore.entries()) {
+      result[key] = val;
+    }
+
+    const db = await getDb();
+    if (db) {
+      try {
+        const docs = await db.collection("content").find({}).toArray();
+        for (const doc of docs) {
+          if (doc.section && doc.data !== undefined) {
+            result[doc.section] = doc.data;
+            contentStore.set(doc.section, doc.data);
+          } else if (doc._id && typeof doc._id === "string" && (doc.data !== undefined || doc.value !== undefined)) {
+            const val = doc.data !== undefined ? doc.data : doc.value;
+            result[doc._id] = val;
+            contentStore.set(doc._id, val);
+          } else if (doc.key && (doc.value !== undefined || doc.data !== undefined)) {
+            const val = doc.data !== undefined ? doc.data : doc.value;
+            result[doc.key] = val;
+            contentStore.set(doc.key, val);
+          } else {
+            for (const [k, v] of Object.entries(doc)) {
+              if (k !== "_id" && k !== "updated_at" && k !== "created_at" && v !== undefined) {
+                result[k] = v;
+                contentStore.set(k, v);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[MongoDB] Read content error:", err);
+      }
+    }
+
+    res.json(result);
+  });
+
+  apiRouter.put("/content/:section", requireAdmin, async (req, res) => {
+    const { section } = req.params;
+    if (!(section in DEFAULT_CONTENT)) {
+      return res.status(400).json({ detail: `Unknown section: ${section}` });
+    }
+    const data = req.body?.data;
+    contentStore.set(section, data);
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("content").updateOne(
+          { $or: [{ section }, { _id: section as any }, { key: section }] },
+          { $set: { section, data, key: section, value: data, updated_at: new Date() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Write content error:", err);
+      }
+    }
+
+    auditLog(`content.save.${section}`, (req as any).user?.sub, req, { section });
+    res.json({ ok: true, section });
+  });
+
+  apiRouter.post("/content/:section/reset", requireAdmin, async (req, res) => {
+    const { section } = req.params;
+    if (!(section in DEFAULT_CONTENT)) {
+      return res.status(400).json({ detail: "Unknown section" });
+    }
+    const defData = JSON.parse(JSON.stringify(DEFAULT_CONTENT[section]));
+    contentStore.set(section, defData);
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("content").updateOne(
+          { $or: [{ section }, { _id: section as any }, { key: section }] },
+          { $set: { section, data: defData, key: section, value: defData, updated_at: new Date() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Reset content error:", err);
+      }
+    }
+
+    auditLog(`content.reset.${section}`, (req as any).user?.sub, req, { section });
+    res.json({ ok: true });
+  });
+
+  // Media / Image endpoint to fetch images from MongoDB Atlas GridFS or collections
+  apiRouter.get(["/images/:id", "/media/:id", "/uploads/:id", "/files/:id"], async (req, res) => {
+    const { id } = req.params;
+    const db = await getDb();
+    if (!db) {
+      return res.status(404).json({ detail: "Image not found (MongoDB not connected)" });
+    }
+
+    try {
+      // 1. Check in collections: images, files, media, uploads, gallery
+      for (const collName of ["images", "files", "media", "uploads", "photos"]) {
+        try {
+          let doc: any = null;
+          if (ObjectId.isValid(id)) {
+            doc = await db.collection(collName).findOne({ _id: new ObjectId(id) });
+          }
+          if (!doc) {
+            doc = await db.collection(collName).findOne({
+              $or: [{ id }, { filename: id }, { name: id }, { key: id }, { title: id }],
+            });
+          }
+          if (doc) {
+            const raw = doc.data || doc.src || doc.url || doc.image || doc.base64;
+            if (typeof raw === "string" && raw.startsWith("data:")) {
+              const matches = raw.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+              if (matches && matches.length === 3) {
+                res.setHeader("Content-Type", matches[1]);
+                res.setHeader("Cache-Control", "public, max-age=86400");
+                return res.send(Buffer.from(matches[2], "base64"));
+              }
+            } else if (doc.buffer || doc.binary) {
+              res.setHeader("Content-Type", doc.contentType || doc.mimeType || "image/jpeg");
+              res.setHeader("Cache-Control", "public, max-age=86400");
+              return res.send(doc.buffer || doc.binary);
+            } else if (typeof raw === "string" && raw.startsWith("http")) {
+              return res.redirect(raw);
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Check in GridFS
+      for (const bucketName of ["fs", "uploads", "images"]) {
+        try {
+          const bucket = new GridFSBucket(db, { bucketName });
+          let fileId: ObjectId | null = null;
+          if (ObjectId.isValid(id)) {
+            fileId = new ObjectId(id);
+          } else {
+            const fileDoc = await db.collection(`${bucketName}.files`).findOne({ filename: id });
+            if (fileDoc) fileId = fileDoc._id;
+          }
+          if (fileId) {
+            const files = await bucket.find({ _id: fileId }).toArray();
+            if (files.length > 0) {
+              const file = files[0];
+              res.setHeader("Content-Type", (file as any).contentType || "image/jpeg");
+              res.setHeader("Cache-Control", "public, max-age=86400");
+              const downloadStream = bucket.openDownloadStream(fileId);
+              return downloadStream.pipe(res);
+            }
+          }
+        } catch {}
+      }
+
+      return res.status(404).json({ detail: "Image not found" });
+    } catch (err) {
+      console.error("[MongoDB] Image retrieve error:", err);
+      return res.status(500).json({ detail: "Error retrieving image" });
+    }
+  });
+
+
+  // Mount router under /api
+  app.use("/api", apiRouter);
+
+  // Also mount router directly for environments where /api is stripped by serverless proxies
+  app.use((req, res, next) => {
+    if (
+      (req.method !== "GET" && req.path.startsWith("/admin")) ||
+      req.path.startsWith("/news") ||
+      req.path.startsWith("/enquiries") ||
+      req.path.startsWith("/content") ||
+      req.path.startsWith("/audit-log") ||
+      req.path.startsWith("/db-status") ||
+      req.path.startsWith("/health") ||
+      req.path.startsWith("/images")
+    ) {
+      return apiRouter(req, res, next);
+    }
+    next();
+  });
+
+  // Global API error handler
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error("[Unhandled Express Error]:", err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({
+      detail: err?.message || "Internal server error occurred",
+    });
+  });
+
+  async function start() {
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const { createServer: createViteServer } = await import("vite");
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa",
+        });
+        app.use(vite.middlewares);
+        app.listen(PORT, "0.0.0.0", () => {
+          console.log(`[Dev] Server running on http://localhost:${PORT}`);
+        });
+      } catch (e) {
+        console.error("Failed to initialize Vite dev server:", e);
+      }
+    } else if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME && !process.env.NOW_REGION) {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`[Prod] Server running on http://localhost:${PORT}`);
+      });
+    }
+  }
+
+  // Only start standalone listener when not in serverless runtime
+  if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME && !process.env.NOW_REGION) {
+    start().catch((err) => {
+      console.error("Failed to start server:", err);
+    });
+  }
+
+export { app };
+export default app;

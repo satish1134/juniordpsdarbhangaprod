@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /admin/login
+Disallow: /admin/dashboard
+Disallow: /api/
+
+# Junior DPS Darbhanga — admin console and API endpoints are for authorised staff only.
+Sitemap: https://www.juniordpsdarbhanga.com/sitemap.xml
