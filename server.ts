@@ -825,6 +825,7 @@ async function verifyPassword(password: string): Promise<boolean> {
 }
 
 const app = express();
+app.set("trust proxy", 1);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -1033,11 +1034,11 @@ apiRouter.post("/admin/login", async (req, res) => {
 
     clearFails(key);
     const token = createToken(ADMIN_USERNAME || "admin");
-    const isProd = process.env.NODE_ENV === "production";
+    const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https";
     res.cookie(COOKIE_NAME, token, {
       maxAge: COOKIE_MAX_AGE,
       httpOnly: true,
-      secure: isProd,
+      secure: isSecure,
       sameSite: "lax",
       path: "/",
     });
@@ -1105,11 +1106,11 @@ apiRouter.post("/admin/2fa/verify-setup", async (req, res) => {
     await auditLog("admin.login_success", decoded.sub, req, { two_factor: true, setup_completed: true });
 
     const token = createToken(decoded.sub || "admin");
-    const isProd = process.env.NODE_ENV === "production";
+    const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https";
     res.cookie(COOKIE_NAME, token, {
       maxAge: COOKIE_MAX_AGE,
       httpOnly: true,
-      secure: isProd,
+      secure: isSecure,
       sameSite: "lax",
       path: "/",
     });

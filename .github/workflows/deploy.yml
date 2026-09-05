@@ -133,3 +133,64 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d app
             docker image prune -f
 
+            # Configure Nginx virtual host for juniordpsdarbhanga.com and www.juniordpsdarbhanga.com
+            cat <<'EOF' > /etc/nginx/sites-available/juniordps
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name juniordpsdarbhanga.com www.juniordpsdarbhanga.com 5.175.216.125;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        client_max_body_size 25M;
+    }
+}
+EOF
+
+            mkdir -p /var/www/certbot /etc/nginx/sites-enabled
+            ln -sf /etc/nginx/sites-available/juniordps /etc/nginx/sites-enabled/juniordps
+            [ -f /etc/nginx/sites-enabled/default ] && rm -f /etc/nginx/sites-enabled/default
+            nginx -t && (systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true)
+
+            # Auto-provision or renew Let's Encrypt SSL if DNS resolves to 5.175.216.125
+            RESOLVED=true
+            for d in juniordpsdarbhanga.com www.juniordpsdarbhanga.com; do
+              if ! getent ahosts "$d" 2>/dev/null | grep -q "5.175.216.125"; then
+                RESOLVED=false
+              fi
+            done
+
+            if [ "$RESOLVED" = "true" ]; then
+              echo "DNS is verified for juniordpsdarbhanga.com. Checking SSL certificates..."
+              if ! command -v certbot >/dev/null 2>&1; then
+                apt-get update -qq && apt-get install -y -qq certbot python3-certbot-nginx
+              fi
+              if [ ! -d "/etc/letsencrypt/live/juniordpsdarbhanga.com" ]; then
+                certbot --nginx -d juniordpsdarbhanga.com -d www.juniordpsdarbhanga.com --non-interactive --agree-tos --email sandyverma3@gmail.com --redirect || true
+              fi
+            else
+              echo "DNS for juniordpsdarbhanga.com has not yet propagated to 5.175.216.125. Skipping Certbot until DNS is pointed."
+            fi
+
