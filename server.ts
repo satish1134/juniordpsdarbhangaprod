@@ -75,8 +75,8 @@ const TOTP_ISSUER = "Junior DPS Darbhanga";
 
 // Brute-force protection
 const LOGIN_FAILS = new Map<string, number[]>();
-const LOGIN_MAX_ATTEMPTS = 5;
-const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 interface AdminSecurity {
   username: string;
@@ -751,8 +751,21 @@ async function verifyPassword(password: string): Promise<boolean> {
     } catch {}
   }
 
-  const configuredPass = (ADMIN_PASSWORD || "").trim();
+  const configuredPass = (process.env.ADMIN_PASSWORD || ADMIN_PASSWORD || "").trim();
   if (configuredPass && trimmed === configuredPass) {
+    if (db && !adminSecurity.passwordHash) {
+      try {
+        const hash = await bcrypt.hash(trimmed, 10);
+        adminSecurity.passwordHash = hash;
+        await db.collection("admin_settings").updateOne(
+          { _id: "security" as any },
+          { $set: { passwordHash: hash, updated_at: new Date() } },
+          { upsert: true }
+        );
+      } catch (e) {
+        console.warn("[MongoDB] Auto-init admin hash warning:", e);
+      }
+    }
     return true;
   }
   return false;
