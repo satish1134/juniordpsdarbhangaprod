@@ -54,14 +54,83 @@ jobs:
     steps:
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
         with:
           host: 5.175.216.125
           port: 22125
           username: root
           password: ${{ secrets.VPS_PASSWORD }}
+          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI
           script: |
             cd /opt/juniordps
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Securely initialize or update .env with injected secrets
+            touch .env
+            chmod 600 .env
+
+            python3 -c "
+import os
+
+env_vars = {
+    'ADMIN_USERNAME': os.environ.get('ADMIN_USERNAME', '').strip(),
+    'ADMIN_PASSWORD': os.environ.get('ADMIN_PASSWORD', '').strip(),
+    'JWT_SECRET': os.environ.get('JWT_SECRET', '').strip(),
+    'MONGO_URI': os.environ.get('MONGO_URI', '').strip(),
+}
+
+existing = {}
+if os.path.exists('.env'):
+    with open('.env', 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                parts = line.split('=', 1)
+                existing[parts[0].strip()] = parts[1].strip()
+
+# Update non-empty secrets from GitHub Actions environment
+for k, v in env_vars.items():
+    if v:
+        existing[k] = v
+
+if 'ADMIN_USERNAME' not in existing or not existing['ADMIN_USERNAME']:
+    existing['ADMIN_USERNAME'] = 'admin'
+if 'PORT' not in existing:
+    existing['PORT'] = '3000'
+if 'NODE_ENV' not in existing:
+    existing['NODE_ENV'] = 'production'
+
+with open('.env', 'w') as f:
+    for k, v in sorted(existing.items()):
+        f.write(f'{k}={v}\n')
+print('[Deployment] Synchronized .env configuration successfully')
+"
+
+            # Ensure docker-compose.prod.yml connects the .env file to the app service
+            python3 -c "
+import os
+if os.path.exists('docker-compose.prod.yml'):
+    with open('docker-compose.prod.yml', 'r') as f:
+        content = f.read()
+    if 'env_file' not in content:
+        lines = content.splitlines()
+        out = []
+        for line in lines:
+            out.append(line)
+            if line.strip() == 'app:':
+                indent = len(line) - len(line.lstrip()) + 4
+                out.append(' ' * indent + 'env_file:')
+                out.append(' ' * indent + '  - .env')
+        with open('docker-compose.prod.yml', 'w') as f:
+            f.write('\n'.join(out) + '\n')
+        print('[Deployment] Updated docker-compose.prod.yml to include env_file: .env')
+"
+
             docker compose -f docker-compose.prod.yml pull app
             docker compose -f docker-compose.prod.yml up -d app
             docker image prune -f
+
