@@ -64,13 +64,37 @@ export const submitEnquiry = (payload) => api.post("/enquiries", payload);
 export const fetchNews = () => api.get("/news");
 export const fetchContent = () => api.get("/content");
 
+export const getAdminPath = () => {
+  if (typeof window !== "undefined" && window.__ADMIN_PATH__) {
+    const p = window.__ADMIN_PATH__.trim();
+    return p.startsWith("/") ? p : `/${p}`;
+  }
+  const envPath = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_ADMIN_PATH) || "";
+  if (envPath) {
+    return envPath.startsWith("/") ? envPath : `/${envPath}`;
+  }
+  return "/manage-school-x92-secure";
+};
+
 // admin
-export const adminLogin = async (username, password, otp) => {
-  const res = await api.post("/admin/login", { username, password, otp });
+export const adminLogin = async (username, password, otp, emailOtp) => {
+  const res = await api.post("/admin/login", { username, password, otp, emailOtp });
   if (res.data?.token && typeof window !== "undefined") {
     initAdminSession(res.data.token, res.data.username || username);
   }
   return res;
+};
+
+export const verifyTwoFaSetup = async (code, tempToken) => {
+  const res = await api.post("/admin/2fa/verify-setup", { code, tempToken });
+  if (res.data?.token && typeof window !== "undefined") {
+    initAdminSession(res.data.token, res.data.username || "admin");
+  }
+  return res;
+};
+
+export const sendEmailOtp = async (username) => {
+  return await api.post("/admin/send-email-otp", { username });
 };
 
 export const adminLogout = async () => {
