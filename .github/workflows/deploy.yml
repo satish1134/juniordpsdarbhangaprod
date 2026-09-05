@@ -59,12 +59,14 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
         with:
           host: 5.175.216.125
           port: 22125
           username: root
           password: ${{ secrets.VPS_PASSWORD }}
-          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI
+          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI,RESEND_API_KEY,SENDER_EMAIL
           script: |
             cd /opt/juniordps
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -81,6 +83,8 @@ env_vars = {
     'ADMIN_PASSWORD': os.environ.get('ADMIN_PASSWORD', '').strip(),
     'JWT_SECRET': os.environ.get('JWT_SECRET', '').strip(),
     'MONGO_URI': os.environ.get('MONGO_URI', '').strip(),
+    'RESEND_API_KEY': os.environ.get('RESEND_API_KEY', '').strip(),
+    'SENDER_EMAIL': os.environ.get('SENDER_EMAIL', '').strip(),
 }
 
 existing = {}
@@ -103,6 +107,9 @@ if 'PORT' not in existing:
     existing['PORT'] = '3000'
 if 'NODE_ENV' not in existing:
     existing['NODE_ENV'] = 'production'
+# Default to internal Docker Compose MongoDB container if MONGO_URI is not explicitly provided
+if 'MONGO_URI' not in existing or not existing['MONGO_URI']:
+    existing['MONGO_URI'] = 'mongodb://mongodb:27017/juniordps'
 
 with open('.env', 'w') as f:
     for k, v in sorted(existing.items()):
