@@ -72,7 +72,23 @@ async function getDb(): Promise<Db | null> {
 const COOKIE_NAME = "jdps_admin";
 const COOKIE_MAX_AGE = 8 * 60 * 60 * 1000; // 8 hours max age
 const TOTP_ISSUER = "Junior DPS Darbhanga";
-const ADMIN_PATH = (process.env.ADMIN_PATH || "/manage-school-x92-secure").replace(/\/+$/, "").replace(/^\/?/, "/");
+function sanitizeAdminPath(input?: string): string {
+  if (!input) return "/manage-school-x92-secure";
+  let s = input.trim();
+  if (s.startsWith("http://") || s.startsWith("https://")) {
+    try {
+      s = new URL(s).pathname;
+    } catch {
+      s = s.replace(/^https?:\/\/[^\/]+/, "");
+    }
+  }
+  s = s.replace(/\/login\/?$/, ""); // strip trailing /login
+  s = s.replace(/\/+$/, "");
+  if (!s.startsWith("/")) s = "/" + s;
+  return (!s || s === "/") ? "/manage-school-x92-secure" : s;
+}
+
+const ADMIN_PATH = sanitizeAdminPath(process.env.ADMIN_PATH);
 
 // Brute-force protection: Max 5 failed attempts -> 15 min block
 const LOGIN_FAILS = new Map<string, number[]>();

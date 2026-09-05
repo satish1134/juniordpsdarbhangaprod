@@ -65,13 +65,24 @@ export const fetchNews = () => api.get("/news");
 export const fetchContent = () => api.get("/content");
 
 export const getAdminPath = () => {
+  let raw = "";
   if (typeof window !== "undefined" && window.__ADMIN_PATH__) {
-    const p = window.__ADMIN_PATH__.trim();
-    return p.startsWith("/") ? p : `/${p}`;
+    raw = window.__ADMIN_PATH__.trim();
+  } else if (typeof import.meta !== "undefined" && import.meta?.env?.VITE_ADMIN_PATH) {
+    raw = import.meta.env.VITE_ADMIN_PATH.trim();
   }
-  const envPath = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_ADMIN_PATH) || "";
-  if (envPath) {
-    return envPath.startsWith("/") ? envPath : `/${envPath}`;
+  if (raw) {
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      try {
+        raw = new URL(raw).pathname;
+      } catch {
+        raw = raw.replace(/^https?:\/\/[^\/]+/, "");
+      }
+    }
+    raw = raw.replace(/\/login\/?$/, "");
+    raw = raw.replace(/\/+$/, "");
+    if (!raw.startsWith("/")) raw = "/" + raw;
+    if (raw && raw !== "/") return raw;
   }
   return "/manage-school-x92-secure";
 };

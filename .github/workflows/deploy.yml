@@ -110,7 +110,10 @@ jobs:
             fi
 
             if [ -n "$ADMIN_PATH" ]; then
-              grep -q "^ADMIN_PATH=" .env && sed -i "s|^ADMIN_PATH=.*|ADMIN_PATH=$ADMIN_PATH|" .env || echo "ADMIN_PATH=$ADMIN_PATH" >> .env
+              CLEAN_ADMIN_PATH=$(echo "$ADMIN_PATH" | sed -E 's|^https?://[^/]+||' | sed -E 's|/login/?$||')
+              [ -z "$CLEAN_ADMIN_PATH" ] && CLEAN_ADMIN_PATH="/manage-school-x92-secure"
+              echo "$CLEAN_ADMIN_PATH" | grep -q "^/" || CLEAN_ADMIN_PATH="/$CLEAN_ADMIN_PATH"
+              grep -q "^ADMIN_PATH=" .env && sed -i "s|^ADMIN_PATH=.*|ADMIN_PATH=$CLEAN_ADMIN_PATH|" .env || echo "ADMIN_PATH=$CLEAN_ADMIN_PATH" >> .env
             else
               grep -q "^ADMIN_PATH=" .env || echo "ADMIN_PATH=/manage-school-x92-secure" >> .env
             fi
