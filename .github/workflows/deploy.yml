@@ -134,40 +134,7 @@ jobs:
             docker image prune -f
 
             # Configure Nginx virtual host for juniordpsdarbhanga.com and www.juniordpsdarbhanga.com
-            cat <<'EOF' > /etc/nginx/sites-available/juniordps
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
-server {
-    listen 80;
-    listen [::]:80;
-    server_name juniordpsdarbhanga.com www.juniordpsdarbhanga.com 5.175.216.125;
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-        try_files $uri =404;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        client_max_body_size 25M;
-    }
-}
-EOF
+            echo "IyBOZ2lueCBWaXJ0dWFsIEhvc3QgQ29uZmlndXJhdGlvbiBmb3IgSnVuaW9yIERQUyBEYXJiaGFuZ2EKIyBEb21haW5zOiBqdW5pb3JkcHNkYXJiaGFuZ2EuY29tLCB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbQoKbWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MDsKICAgIGxpc3RlbiBbOjpdOjgwOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1OwoKICAgICMgTGV0J3MgRW5jcnlwdCBBQ01FIGNoYWxsZW5nZSBsb2NhdGlvbiBmb3IgU1NMIGlzc3VhbmNlIGFuZCBhdXRvbWF0ZWQgcmVuZXdhbAogICAgbG9jYXRpb24gLy53ZWxsLWtub3duL2FjbWUtY2hhbGxlbmdlLyB7CiAgICAgICAgcm9vdCAvdmFyL3d3dy9jZXJ0Ym90OwogICAgICAgIHRyeV9maWxlcyAkdXJpID00MDQ7CiAgICB9CgogICAgIyBQcm94eSB0byBOb2RlLmpzIC8gRG9ja2VyIGNvbnRhaW5lciBvbiBwb3J0IDMwMDAKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAwOwogICAgICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uICRjb25uZWN0aW9uX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICAgICAgcHJveHlfY2FjaGVfYnlwYXNzICRodHRwX3VwZ3JhZGU7CgogICAgICAgICMgVGltZW91dHMgYW5kIGJ1ZmZlciBzaXplcwogICAgICAgIHByb3h5X2Nvbm5lY3RfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfc2VuZF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9yZWFkX3RpbWVvdXQgNjBzOwogICAgICAgIGNsaWVudF9tYXhfYm9keV9zaXplIDI1TTsKICAgIH0KfQo=" | base64 -d > /etc/nginx/sites-available/juniordps
 
             mkdir -p /var/www/certbot /etc/nginx/sites-enabled
             ln -sf /etc/nginx/sites-available/juniordps /etc/nginx/sites-enabled/juniordps
