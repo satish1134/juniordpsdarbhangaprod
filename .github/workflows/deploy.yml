@@ -75,67 +75,44 @@ jobs:
             touch .env
             chmod 600 .env
 
-            python3 -c "
-import os
+            # Write or update configuration keys
+            grep -q "^PORT=" .env && sed -i "s/^PORT=.*/PORT=3000/" .env || echo "PORT=3000" >> .env
+            grep -q "^NODE_ENV=" .env && sed -i "s/^NODE_ENV=.*/NODE_ENV=production/" .env || echo "NODE_ENV=production" >> .env
 
-env_vars = {
-    'ADMIN_USERNAME': os.environ.get('ADMIN_USERNAME', '').strip(),
-    'ADMIN_PASSWORD': os.environ.get('ADMIN_PASSWORD', '').strip(),
-    'JWT_SECRET': os.environ.get('JWT_SECRET', '').strip(),
-    'MONGO_URI': os.environ.get('MONGO_URI', '').strip(),
-    'RESEND_API_KEY': os.environ.get('RESEND_API_KEY', '').strip(),
-    'SENDER_EMAIL': os.environ.get('SENDER_EMAIL', '').strip(),
-}
+            if [ -n "$ADMIN_USERNAME" ]; then
+              grep -q "^ADMIN_USERNAME=" .env && sed -i "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=$ADMIN_USERNAME|" .env || echo "ADMIN_USERNAME=$ADMIN_USERNAME" >> .env
+            else
+              grep -q "^ADMIN_USERNAME=" .env || echo "ADMIN_USERNAME=admin" >> .env
+            fi
 
-existing = {}
-if os.path.exists('.env'):
-    with open('.env', 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                parts = line.split('=', 1)
-                existing[parts[0].strip()] = parts[1].strip()
+            if [ -n "$ADMIN_PASSWORD" ]; then
+              grep -q "^ADMIN_PASSWORD=" .env && sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$ADMIN_PASSWORD|" .env || echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> .env
+            fi
 
-# Update non-empty secrets from GitHub Actions environment
-for k, v in env_vars.items():
-    if v:
-        existing[k] = v
+            if [ -n "$JWT_SECRET" ]; then
+              grep -q "^JWT_SECRET=" .env && sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env || echo "JWT_SECRET=$JWT_SECRET" >> .env
+            fi
 
-if 'ADMIN_USERNAME' not in existing or not existing['ADMIN_USERNAME']:
-    existing['ADMIN_USERNAME'] = 'admin'
-if 'PORT' not in existing:
-    existing['PORT'] = '3000'
-if 'NODE_ENV' not in existing:
-    existing['NODE_ENV'] = 'production'
-# Default to internal Docker Compose MongoDB container if MONGO_URI is not explicitly provided
-if 'MONGO_URI' not in existing or not existing['MONGO_URI']:
-    existing['MONGO_URI'] = 'mongodb://mongodb:27017/juniordps'
+            if [ -n "$MONGO_URI" ]; then
+              grep -q "^MONGO_URI=" .env && sed -i "s|^MONGO_URI=.*|MONGO_URI=$MONGO_URI|" .env || echo "MONGO_URI=$MONGO_URI" >> .env
+            else
+              grep -q "^MONGO_URI=" .env || echo "MONGO_URI=mongodb://mongodb:27017/juniordps" >> .env
+            fi
 
-with open('.env', 'w') as f:
-    for k, v in sorted(existing.items()):
-        f.write(f'{k}={v}\n')
-print('[Deployment] Synchronized .env configuration successfully')
-"
+            if [ -n "$RESEND_API_KEY" ]; then
+              grep -q "^RESEND_API_KEY=" .env && sed -i "s|^RESEND_API_KEY=.*|RESEND_API_KEY=$RESEND_API_KEY|" .env || echo "RESEND_API_KEY=$RESEND_API_KEY" >> .env
+            fi
+
+            if [ -n "$SENDER_EMAIL" ]; then
+              grep -q "^SENDER_EMAIL=" .env && sed -i "s|^SENDER_EMAIL=.*|SENDER_EMAIL=$SENDER_EMAIL|" .env || echo "SENDER_EMAIL=$SENDER_EMAIL" >> .env
+            fi
 
             # Ensure docker-compose.prod.yml connects the .env file to the app service
-            python3 -c "
-import os
-if os.path.exists('docker-compose.prod.yml'):
-    with open('docker-compose.prod.yml', 'r') as f:
-        content = f.read()
-    if 'env_file' not in content:
-        lines = content.splitlines()
-        out = []
-        for line in lines:
-            out.append(line)
-            if line.strip() == 'app:':
-                indent = len(line) - len(line.lstrip()) + 4
-                out.append(' ' * indent + 'env_file:')
-                out.append(' ' * indent + '  - .env')
-        with open('docker-compose.prod.yml', 'w') as f:
-            f.write('\n'.join(out) + '\n')
-        print('[Deployment] Updated docker-compose.prod.yml to include env_file: .env')
-"
+            if [ -f "docker-compose.prod.yml" ]; then
+              if ! grep -q "env_file:" docker-compose.prod.yml; then
+                sed -i '/app:/a \    env_file:\n      - .env' docker-compose.prod.yml
+              fi
+            fi
 
             docker compose -f docker-compose.prod.yml pull app
             docker compose -f docker-compose.prod.yml up -d app
