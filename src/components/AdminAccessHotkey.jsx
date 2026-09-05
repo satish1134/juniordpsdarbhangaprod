@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { adminMe } from "../lib/api";
+import { adminMe, getAdminPath } from "../lib/api";
 import { hasValidAdminSession, clearAdminSession } from "../lib/sessionManager";
 
 /**
@@ -13,6 +13,7 @@ import { hasValidAdminSession, clearAdminSession } from "../lib/sessionManager";
 const AdminAccessHotkey = () => {
   const [signedIn, setSignedIn] = useState(false);
   const navigate = useNavigate();
+  const adminPath = getAdminPath();
 
   useEffect(() => {
     let alive = true;
@@ -37,12 +38,12 @@ const AdminAccessHotkey = () => {
       if (e.altKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
         e.preventDefault();
         const valid = hasValidAdminSession();
-        navigate(valid && signedIn ? "/admin" : "/admin/login");
+        navigate(valid && signedIn ? adminPath : `${adminPath}/login`);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, signedIn]);
+  }, [navigate, signedIn, adminPath]);
 
   return null;
 };

@@ -61,12 +61,14 @@ jobs:
           MONGO_URI: ${{ secrets.MONGO_URI }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          ADMIN_PATH: ${{ secrets.ADMIN_PATH }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
         with:
           host: 5.175.216.125
           port: 22125
           username: root
           password: ${{ secrets.VPS_PASSWORD }}
-          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI,RESEND_API_KEY,SENDER_EMAIL
+          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI,RESEND_API_KEY,SENDER_EMAIL,ADMIN_PATH,ADMIN_EMAIL
           script: |
             cd /opt/juniordps
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -105,6 +107,16 @@ jobs:
 
             if [ -n "$SENDER_EMAIL" ]; then
               grep -q "^SENDER_EMAIL=" .env && sed -i "s|^SENDER_EMAIL=.*|SENDER_EMAIL=$SENDER_EMAIL|" .env || echo "SENDER_EMAIL=$SENDER_EMAIL" >> .env
+            fi
+
+            if [ -n "$ADMIN_PATH" ]; then
+              grep -q "^ADMIN_PATH=" .env && sed -i "s|^ADMIN_PATH=.*|ADMIN_PATH=$ADMIN_PATH|" .env || echo "ADMIN_PATH=$ADMIN_PATH" >> .env
+            else
+              grep -q "^ADMIN_PATH=" .env || echo "ADMIN_PATH=/manage-school-x92-secure" >> .env
+            fi
+
+            if [ -n "$ADMIN_EMAIL" ]; then
+              grep -q "^ADMIN_EMAIL=" .env && sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ADMIN_EMAIL|" .env || echo "ADMIN_EMAIL=$ADMIN_EMAIL" >> .env
             fi
 
             # Ensure docker-compose.prod.yml connects the .env file to the app service

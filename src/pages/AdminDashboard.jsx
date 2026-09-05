@@ -21,7 +21,7 @@ import { LOGO_RADIUS_CLASS, fontFamilyFor } from "../lib/displaySizes";
 import { logError } from "../lib/logger";
 import {
   adminMe, adminLogout, listEnquiries, updateEnquiryStatus, deleteEnquiry,
-  listAllNews, createNews, updateNews, deleteNews, fetchDbStatus,
+  listAllNews, createNews, updateNews, deleteNews, fetchDbStatus, getAdminPath,
 } from "../lib/api";
 
 const statusColors = {
@@ -47,6 +47,8 @@ const AdminDashboard = () => {
   const nameFont = fontFamilyFor((content.display || {}).name_font);
 
   // Inactivity auto-logout handler (5 minutes timeout)
+  const adminPath = getAdminPath();
+
   const handleAutoLogout = useCallback(async () => {
     try {
       await adminLogout();
@@ -58,8 +60,8 @@ const AdminDashboard = () => {
       title: "Session Expired",
       description: "You were logged out automatically due to 5 minutes of inactivity.",
     });
-    navigate("/admin/login?reason=idle_timeout");
-  }, [navigate, toast]);
+    navigate(`${adminPath}/login?reason=idle_timeout`);
+  }, [adminPath, navigate, toast]);
 
   const { showWarning, remainingSeconds, resetActivity } = useAdminInactivity({
     onTimeout: handleAutoLogout,
@@ -86,7 +88,7 @@ const AdminDashboard = () => {
         title: "Session Expired",
         description: "Your session expired after 5 minutes of inactivity. Please sign in again.",
       });
-      navigate("/admin/login?reason=idle_timeout");
+      navigate(`${adminPath}/login?reason=idle_timeout`);
       return;
     }
 
@@ -94,14 +96,14 @@ const AdminDashboard = () => {
       .then(() => refresh())
       .catch(() => {
         clearAdminSession();
-        navigate("/admin/login");
+        navigate(`${adminPath}/login`);
       });
-  }, [navigate, refresh, toast]);
+  }, [adminPath, navigate, refresh, toast]);
 
   const logout = async () => {
     try { await adminLogout(); } catch (err) { logError("Logout failed:", err); }
     clearAdminSession();
-    navigate("/admin/login");
+    navigate(`${adminPath}/login`);
   };
 
   const setStatus = async (id, status) => {

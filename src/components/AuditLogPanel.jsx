@@ -96,17 +96,28 @@ const AuditLogPanel = () => {
         <div className="py-16 text-center text-[#1c2a24]/50 text-[14px]">No events recorded yet.</div>
       ) : (
         <div className="divide-y divide-[#0a5f3d]/8">
+          <div className="hidden md:grid grid-cols-12 gap-3 px-5 py-2.5 text-[11px] font-bold uppercase tracking-wider text-[#0a5f3d] bg-[#f5f2ea]/60">
+            <div className="col-span-2">Time (IST)</div>
+            <div className="col-span-2">Action</div>
+            <div className="col-span-2">User</div>
+            <div className="col-span-2">IP Address</div>
+            <div className="col-span-2">Device / Browser</div>
+            <div className="col-span-2">Details</div>
+          </div>
           {data.items.map((ev) => (
-            <div key={ev.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 px-5 py-3.5 items-start hover:bg-[#f5f2ea]/40" data-testid={`audit-row-${ev.id}`}>
-              <div className="md:col-span-3 text-[12.5px] text-[#1c2a24]/70 font-mono">{fmtDate(ev.timestamp)}</div>
-              <div className="md:col-span-3">
-                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wide border ${badgeForAction(ev.action)}`}>
+            <div key={ev.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 px-5 py-3.5 items-start hover:bg-[#f5f2ea]/40 text-[12px]" data-testid={`audit-row-${ev.id}`}>
+              <div className="md:col-span-2 text-[#1c2a24]/70 font-mono text-[11.5px]">{fmtDate(ev.timestamp)}</div>
+              <div className="md:col-span-2">
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-bold tracking-wide border ${badgeForAction(ev.action)}`}>
                   {ev.action}
                 </span>
               </div>
-              <div className="md:col-span-2 text-[13px] text-[#0a3d29] font-semibold">{ev.actor}</div>
-              <div className="md:col-span-2 text-[12px] text-[#1c2a24]/65 font-mono">{ev.ip || "—"}</div>
-              <div className="md:col-span-2 text-[12px] text-[#1c2a24]/55 truncate" title={JSON.stringify(ev.details || {})}>
+              <div className="md:col-span-2 text-[#0a3d29] font-semibold truncate">{ev.actor}</div>
+              <div className="md:col-span-2 text-[#1c2a24]/65 font-mono">{ev.ip || "—"}</div>
+              <div className="md:col-span-2 text-[#1c2a24]/75 truncate font-medium" title={ev.device || ev.user_agent || ""}>
+                {ev.device || ev.user_agent || "—"}
+              </div>
+              <div className="md:col-span-2 text-[#1c2a24]/55 truncate" title={JSON.stringify(ev.details || {})}>
                 {Object.entries(ev.details || {}).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join(" · ") || "—"}
               </div>
             </div>

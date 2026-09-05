@@ -13,9 +13,11 @@ import TransportPage from "./pages/TransportPage";
 import PolicyPage from "./pages/PolicyPage";
 import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
+import NotFoundPage from "./pages/NotFoundPage";
 import { ContentProvider } from "./lib/ContentContext";
 import ThemeVars from "./components/ThemeVars";
 import AdminAccessHotkey from "./components/AdminAccessHotkey";
+import { getAdminPath } from "./lib/api";
 import { ShieldCheck, FileText } from "lucide-react";
 
 class ErrorBoundary extends Component {
@@ -121,6 +123,8 @@ const HomePageWrapper = () => {
 };
 
 function App() {
+  const adminPath = getAdminPath();
+
   return (
     <ErrorBoundary>
       <div className="App">
@@ -137,8 +141,17 @@ function App() {
                 <Route path="/privacy" element={<PolicyPage sectionKey="privacy_policy" fallbackTitle="Privacy Policy" Icon={ShieldCheck} />} />
                 <Route path="/terms" element={<PolicyPage sectionKey="terms_of_use" fallbackTitle="Terms of Use" Icon={FileText} />} />
               </Route>
-              <Route path="/admin/login" element={<AdminLogin />} />
-              <Route path="/admin" element={<AdminDashboard />} />
+
+              {/* Obscure Admin URL Routes (Protected, No Public Discovery) */}
+              <Route path={`${adminPath}/login`} element={<AdminLogin />} />
+              <Route path={adminPath} element={<AdminDashboard />} />
+
+              {/* Strictly block /admin and /admin/* with 404 Not Found */}
+              <Route path="/admin" element={<NotFoundPage />} />
+              <Route path="/admin/*" element={<NotFoundPage />} />
+
+              {/* Fallback 404 for any other undefined path */}
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>
         </ContentProvider>

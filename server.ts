@@ -4,7 +4,7 @@ import cors from "cors";
 import path from "path";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import { authenticator } from "otplib";
+import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import { MongoClient, Db, GridFSBucket, ObjectId } from "mongodb";
 import { Resend } from "resend";
@@ -70,13 +70,38 @@ async function getDb(): Promise<Db | null> {
   return mongoConnectingPromise;
 }
 const COOKIE_NAME = "jdps_admin";
-const COOKIE_MAX_AGE = 2 * 60 * 60 * 1000; // 2 hours max age
+const COOKIE_MAX_AGE = 8 * 60 * 60 * 1000; // 8 hours max age
 const TOTP_ISSUER = "Junior DPS Darbhanga";
+const ADMIN_PATH = (process.env.ADMIN_PATH || "/manage-school-x92-secure").replace(/\/+$/, "").replace(/^\/?/, "/");
 
-// Brute-force protection
+// Brute-force protection: Max 5 failed attempts -> 15 min block
 const LOGIN_FAILS = new Map<string, number[]>();
-const LOGIN_MAX_ATTEMPTS = 10;
-const LOGIN_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes lockout
+
+// Email OTP temporary store
+const EMAIL_OTP_CACHE = new Map<string, { code: string; expires: number }>();
+
+function parseDevice(userAgent: string | null | undefined): string {
+  if (!userAgent) return "Unknown Device";
+  const ua = userAgent.toLowerCase();
+  let browser = "Browser";
+  if (ua.includes("edg/")) browser = "Edge";
+  else if (ua.includes("chrome/") && !ua.includes("edg/")) browser = "Chrome";
+  else if (ua.includes("firefox/")) browser = "Firefox";
+  else if (ua.includes("safari/") && !ua.includes("chrome/")) browser = "Safari";
+  else if (ua.includes("curl") || ua.includes("postman")) browser = "API Client";
+
+  let os = "OS";
+  if (ua.includes("iphone")) os = "iPhone (iOS)";
+  else if (ua.includes("ipad")) os = "iPad (iPadOS)";
+  else if (ua.includes("android")) os = "Android";
+  else if (ua.includes("mac os x") || ua.includes("macintosh")) os = "macOS";
+  else if (ua.includes("windows")) os = "Windows";
+  else if (ua.includes("linux")) os = "Linux";
+
+  return `${browser} on ${os}`;
+}
 
 interface AdminSecurity {
   username: string;
@@ -99,16 +124,19 @@ interface AuditLogEntry {
   actor: string;
   ip: string | null;
   user_agent: string | null;
+  device?: string | null;
   details: Record<string, any>;
 }
 
 const auditLogs: AuditLogEntry[] = [];
 
-function auditLog(action: string, actor?: string, req?: Request, details?: Record<string, any>) {
+async function auditLog(action: string, actor?: string, req?: Request, details?: Record<string, any>) {
   try {
     const fwd = req?.headers["x-forwarded-for"];
     const ip = typeof fwd === "string" ? fwd.split(",")[0].trim() : (req?.ip || null);
     const user_agent = (req?.headers["user-agent"] as string) || null;
+    const device = parseDevice(user_agent);
+
     const entry: AuditLogEntry = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       timestamp: new Date().toISOString(),
@@ -116,11 +144,19 @@ function auditLog(action: string, actor?: string, req?: Request, details?: Recor
       actor: actor || "anonymous",
       ip,
       user_agent,
+      device,
       details: details || {},
     };
+
     auditLogs.unshift(entry);
     if (auditLogs.length > 2000) {
       auditLogs.pop();
+    }
+
+    // Persist permanently in MongoDB
+    const db = await getDb();
+    if (db) {
+      await db.collection("admin_audit_logs").insertOne(entry).catch(() => {});
     }
   } catch (e) {
     console.error("audit_log error:", e);
@@ -688,11 +724,12 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 function checkLockout(key: string): number | null {
   const now = Date.now();
   let fails = LOGIN_FAILS.get(key) || [];
-  fails = fails.filter((t) => now - t < LOGIN_WINDOW_MS);
+  fails = fails.filter((t) => now - t < LOGIN_LOCKOUT_MS);
   LOGIN_FAILS.set(key, fails);
   if (fails.length >= LOGIN_MAX_ATTEMPTS) {
-    const retryAfter = Math.ceil((LOGIN_WINDOW_MS - (now - fails[0])) / 1000);
-    return Math.max(retryAfter, 30);
+    const oldestFail = fails[0];
+    const retryAfter = Math.ceil((LOGIN_LOCKOUT_MS - (now - oldestFail)) / 1000);
+    return Math.max(retryAfter, 1);
   }
   return null;
 }
@@ -789,10 +826,72 @@ app.use((req, res, next) => {
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Server", "jdps-web");
   res.removeHeader("X-Powered-By");
+
+  // No Public Discovery: noindex, nofollow for admin and sensitive endpoints
+  const p = req.path.toLowerCase();
+  if (
+    p.startsWith(ADMIN_PATH) ||
+    p.startsWith("/admin") ||
+    p.startsWith("/api/admin") ||
+    p.startsWith("/api/audit-log")
+  ) {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
+  }
+
+  next();
+});
+
+// Dynamic robots.txt with Disallow for the secret admin path and internal endpoints
+app.get("/robots.txt", (req, res) => {
+  res.type("text/plain");
+  res.send(
+    `User-agent: *\nDisallow: ${ADMIN_PATH}/\nDisallow: /admin/\nDisallow: /api/admin/\nDisallow: /api/audit-log\n\nSitemap: /sitemap.xml\n`
+  );
+});
+
+// Strictly block /admin and /admin/* with a genuine 404 response to obscure admin location
+app.use((req, res, next) => {
+  const p = req.path.toLowerCase();
+  if (
+    p === "/admin" ||
+    p === "/admin/" ||
+    (p.startsWith("/admin/") && !p.startsWith("/api/"))
+  ) {
+    return res.status(404).send(
+      `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="robots" content="noindex, nofollow">
+  <title>404 Not Found</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: white; padding: 2.5rem 3rem; border-radius: 1rem; border: 1px solid #e2e8f0; text-align: center; max-width: 440px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+    h1 { font-size: 2.25rem; font-weight: 800; color: #0f172a; margin-bottom: 0.5rem; }
+    p { color: #64748b; font-size: 1rem; line-height: 1.5; margin-bottom: 1.5rem; }
+    a { display: inline-block; background: #0a5f3d; color: white; padding: 0.625rem 1.25rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; font-size: 0.875rem; }
+    a:hover { background: #074a2f; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>404</h1>
+    <p>The requested URL was not found on this server.</p>
+    <a href="/">Return to Homepage</a>
+  </div>
+</body>
+</html>`
+    );
+  }
   next();
 });
 
 const apiRouter = express.Router();
+
+// Public discovery endpoint for client to resolve dynamic admin path
+apiRouter.get("/config/admin-path", (req, res) => {
+  res.json({ admin_path: ADMIN_PATH });
+});
 
 // Root & Health
 apiRouter.get("/", (req, res) => {
@@ -826,16 +925,21 @@ apiRouter.get("/db-status", async (req, res) => {
 // Admin Login
 apiRouter.post("/admin/login", async (req, res) => {
   try {
-    const { username, password, otp } = req.body || {};
+    const { username, password, otp, emailOtp } = req.body || {};
     const user = (username || "").trim();
     const pass = (password || "").trim();
-    const ip = req.ip || "unknown";
-    const key = `${user}:${ip}`;
+    const fwd = req.headers["x-forwarded-for"];
+    const ip = typeof fwd === "string" ? fwd.split(",")[0].trim() : (req.ip || "unknown");
+    const key = `${user.toLowerCase()}:${ip}`;
 
     const retryAfter = checkLockout(key);
     if (retryAfter !== null) {
+      await auditLog("admin.rate_limit_locked", user || "?", req, {
+        retry_after_sec: retryAfter,
+        attempts: LOGIN_MAX_ATTEMPTS,
+      });
       return res.status(429).json({
-        detail: `Too many failed login attempts. Try again in ${retryAfter} seconds.`,
+        detail: `Account locked due to 5 consecutive failed attempts. Please try again in ${Math.ceil(retryAfter / 60)} minutes (${retryAfter}s).`,
       });
     }
 
@@ -846,24 +950,69 @@ apiRouter.post("/admin/login", async (req, res) => {
 
     if (!isUserValid || !isPassValid) {
       recordFail(key);
-      auditLog("admin.login_failed", user || "?", req, { reason: "bad_password" });
-      return res.status(401).json({ detail: "Invalid username or password" });
+      await auditLog("admin.login_failed", user || "?", req, { reason: "bad_credentials" });
+      return res.status(401).json({ detail: "Invalid username or password." });
     }
 
+    await loadAdminSecurityFromDb();
     const twoFactorEnabled = !!(adminSecurity.enabled && adminSecurity.secret);
-    if (twoFactorEnabled) {
-      const code = (otp || "").toString().trim();
-      if (!code || !/^\d{6}$/.test(code)) {
-        recordFail(key);
-        auditLog("admin.login_failed", user, req, { reason: "otp_missing" });
-        return res.status(401).json({ detail: "OTP required" });
+
+    // 2FA is COMPULSORY for administrator accounts
+    if (!twoFactorEnabled) {
+      const secret = speakeasy.generateSecret({
+        length: 20,
+        name: `Junior DPS Darbhanga (${user || "admin"})`,
+        issuer: TOTP_ISSUER,
+      });
+
+      const qr_data_url = await QRCode.toDataURL(secret.otpauth_url || "");
+      const tempToken = jwt.sign(
+        { temp: true, sub: user || "admin", secret: secret.base32 },
+        JWT_SECRET,
+        { expiresIn: "15m" }
+      );
+
+      await auditLog("admin.2fa_setup_prompted", user, req, { reason: "compulsory_2fa_setup" });
+
+      return res.json({
+        require_2fa_setup: true,
+        secret: secret.base32,
+        qr_data_url,
+        temp_token: tempToken,
+        detail: "Google Authenticator 2FA setup is compulsory. Scan the QR code to finish sign in.",
+      });
+    }
+
+    // 2FA verification step
+    const code = (otp || emailOtp || "").toString().trim();
+    if (!code || !/^\d{6}$/.test(code)) {
+      await auditLog("admin.2fa_prompted", user, req);
+      return res.status(401).json({
+        require_2fa: true,
+        detail: "Two-factor authentication code required (from Google Authenticator or Email OTP).",
+      });
+    }
+
+    let isValidTotp = speakeasy.totp.verify({
+      secret: adminSecurity.secret!,
+      encoding: "base32",
+      token: code,
+      window: 1, // Allow +/- 30s for time drift
+    });
+
+    // Check Email OTP fallback
+    if (!isValidTotp) {
+      const cached = EMAIL_OTP_CACHE.get(user.toLowerCase());
+      if (cached && cached.code === code && Date.now() < cached.expires) {
+        isValidTotp = true;
+        EMAIL_OTP_CACHE.delete(user.toLowerCase());
       }
-      const isValid = authenticator.verify({ token: code, secret: adminSecurity.secret! });
-      if (!isValid) {
-        recordFail(key);
-        auditLog("admin.login_failed", user, req, { reason: "otp_invalid" });
-        return res.status(401).json({ detail: "Invalid OTP" });
-      }
+    }
+
+    if (!isValidTotp) {
+      recordFail(key);
+      await auditLog("admin.login_failed", user, req, { reason: "otp_invalid" });
+      return res.status(401).json({ detail: "Invalid 6-digit authentication code." });
     }
 
     clearFails(key);
@@ -873,124 +1022,278 @@ apiRouter.post("/admin/login", async (req, res) => {
       maxAge: COOKIE_MAX_AGE,
       httpOnly: true,
       secure: isProd,
-      sameSite: isProd ? "none" : "lax",
+      sameSite: "lax",
       path: "/",
     });
 
-    auditLog("admin.login_success", ADMIN_USERNAME, req, { two_factor: twoFactorEnabled });
-    return res.json({ token, username: ADMIN_USERNAME, two_factor_enabled: twoFactorEnabled });
+    await auditLog("admin.login_success", ADMIN_USERNAME, req, {
+      two_factor: true,
+      auth_method: "password_and_2fa",
+    });
+
+    return res.json({
+      token,
+      username: ADMIN_USERNAME,
+      two_factor_enabled: true,
+    });
   } catch (err: any) {
     console.error("[Login Error]:", err);
     return res.status(500).json({ detail: err?.message || "Login authentication error" });
   }
 });
 
-  // Admin Logout
-  apiRouter.post("/admin/logout", (req, res) => {
-    const user = verifyAdmin(req);
-    res.clearCookie(COOKIE_NAME, { path: "/" });
-    if (user) {
-      auditLog("admin.logout", user.sub, req);
+// Verify & Activate Compulsory 2FA Setup
+apiRouter.post("/admin/2fa/verify-setup", async (req, res) => {
+  try {
+    const { code, tempToken } = req.body || {};
+    const inputCode = (code || "").toString().trim();
+    if (!inputCode || !tempToken) {
+      return res.status(400).json({ detail: "6-digit code and setup token are required." });
     }
-    res.json({ ok: true });
-  });
 
-  // Admin Me
-  apiRouter.get("/admin/me", requireAdmin, (req, res) => {
-    const user = (req as any).user;
-    res.json({
-      username: user.sub,
-      role: user.role,
-      two_factor_enabled: !!(adminSecurity.enabled && adminSecurity.secret),
+    let decoded: any;
+    try {
+      decoded = jwt.verify(tempToken, JWT_SECRET);
+    } catch {
+      return res.status(400).json({ detail: "Setup token expired or invalid. Please sign in again." });
+    }
+
+    if (!decoded?.temp || !decoded?.secret) {
+      return res.status(400).json({ detail: "Invalid setup session." });
+    }
+
+    const isValid = speakeasy.totp.verify({
+      secret: decoded.secret,
+      encoding: "base32",
+      token: inputCode,
+      window: 1,
     });
-  });
 
-  // Audit Log
-  apiRouter.get("/audit-log", requireAdmin, (req, res) => {
-    const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 500));
-    const skip = Math.max(0, parseInt(req.query.skip as string) || 0);
-    const action = req.query.action as string;
-
-    const filtered = action ? auditLogs.filter((l) => l.action === action) : auditLogs;
-    const items = filtered.slice(skip, skip + limit);
-    res.json({ total: filtered.length, items, limit, skip });
-  });
-
-  // 2FA Status
-  apiRouter.get("/admin/2fa/status", requireAdmin, (req, res) => {
-    res.json({ enabled: !!(adminSecurity.enabled && adminSecurity.secret) });
-  });
-
-  // 2FA Setup
-  apiRouter.post("/admin/2fa/setup", requireAdmin, async (req, res) => {
-    if (adminSecurity.enabled) {
-      return res.status(400).json({ detail: "2FA is already enabled. Disable it first to re-provision." });
-    }
-    const secret = authenticator.generateSecret();
-    const uri = authenticator.keyuri(ADMIN_USERNAME, TOTP_ISSUER, secret);
-    const qr_data_url = await QRCode.toDataURL(uri);
-
-    adminSecurity.secret = secret;
-    adminSecurity.enabled = false;
-
-    auditLog("admin.2fa_setup_started", (req as any).user?.sub, req);
-    res.json({ secret, otpauth_uri: uri, qr_data_url, issuer: TOTP_ISSUER });
-  });
-
-  // 2FA Enable
-  apiRouter.post("/admin/2fa/enable", requireAdmin, async (req, res) => {
-    const { code } = req.body || {};
-    if (!adminSecurity.secret) {
-      return res.status(400).json({ detail: "Run setup first." });
-    }
-    const isValid = authenticator.verify({ token: (code || "").toString().trim(), secret: adminSecurity.secret });
     if (!isValid) {
-      return res.status(400).json({ detail: "Invalid or expired code." });
+      return res.status(400).json({ detail: "Invalid 6-digit code. Please verify against Google Authenticator." });
     }
+
+    adminSecurity.secret = decoded.secret;
     adminSecurity.enabled = true;
+
     const db = await getDb();
     if (db) {
-      try {
-        await db.collection("admin_settings").updateOne(
-          { _id: "security" as any },
-          { $set: { secret: adminSecurity.secret, enabled: true, updated_at: new Date() } },
-          { upsert: true }
-        );
-      } catch (err) {
-        console.error("[MongoDB] Failed to persist 2FA enable:", err);
-      }
+      await db.collection("admin_settings").updateOne(
+        { _id: "security" as any },
+        { $set: { secret: decoded.secret, enabled: true, updated_at: new Date() } },
+        { upsert: true }
+      );
     }
-    auditLog("admin.2fa_enabled", (req as any).user?.sub, req);
-    res.json({ ok: true, enabled: true });
+
+    await auditLog("admin.2fa_enabled", decoded.sub, req);
+    await auditLog("admin.login_success", decoded.sub, req, { two_factor: true, setup_completed: true });
+
+    const token = createToken(decoded.sub || "admin");
+    const isProd = process.env.NODE_ENV === "production";
+    res.cookie(COOKIE_NAME, token, {
+      maxAge: COOKIE_MAX_AGE,
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      path: "/",
+    });
+
+    return res.json({ token, username: decoded.sub, two_factor_enabled: true });
+  } catch (err: any) {
+    console.error("[2FA Setup Verification Error]:", err);
+    return res.status(500).json({ detail: err?.message || "2FA activation error" });
+  }
+});
+
+// Send Email OTP for admin login backup
+apiRouter.post("/admin/send-email-otp", async (req, res) => {
+  try {
+    const { username } = req.body || {};
+    const user = (username || "").trim();
+    if (!user) {
+      return res.status(400).json({ detail: "Username is required." });
+    }
+
+    const resendKey = (process.env.RESEND_API_KEY || "").trim();
+    const adminEmail = (process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || "sandyverma3@gmail.com").trim();
+
+    if (!resendKey) {
+      return res.status(400).json({
+        detail: "Email service (RESEND_API_KEY) is not configured. Please use your Google Authenticator code.",
+      });
+    }
+
+    // Generate secure 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    EMAIL_OTP_CACHE.set(user.toLowerCase(), {
+      code: otp,
+      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+    });
+
+    const resendClient = new Resend(resendKey);
+    const sender = process.env.SENDER_EMAIL || "admin@juniordpsdarbhanga.com";
+
+    await resendClient.emails.send({
+      from: sender.includes("@") ? sender : "Junior DPS <onboarding@resend.dev>",
+      to: [adminEmail],
+      subject: `Your Junior DPS Darbhanga Admin Login OTP: ${otp}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #e0e0e0;rounded:12px;">
+          <h2 style="color:#0a5f3d;margin-top:0;">Junior DPS Darbhanga — Admin Login Verification</h2>
+          <p style="font-size:15px;color:#333;">A login attempt was initiated for user <strong>${user}</strong>.</p>
+          <div style="background:#f5f2ea;padding:16px;border-radius:8px;text-align:center;margin:24px 0;">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:6px;">Your 6-Digit Verification Code</div>
+            <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#0a3d29;font-family:monospace;">${otp}</div>
+          </div>
+          <p style="font-size:13px;color:#666;line-height:1.5;">This code is valid for 10 minutes. If you did not initiate this request, someone may be attempting to access the admin portal.</p>
+        </div>
+      `,
+    });
+
+    await auditLog("admin.email_otp_sent", user, req, { destination: adminEmail });
+    return res.json({ ok: true, message: `OTP sent to administrator email (${adminEmail.slice(0, 3)}***)` });
+  } catch (err: any) {
+    console.error("[Email OTP Error]:", err);
+    return res.status(500).json({ detail: err?.message || "Failed to dispatch email OTP." });
+  }
+});
+
+// Admin Logout
+apiRouter.post("/admin/logout", (req, res) => {
+  const user = verifyAdmin(req);
+  res.clearCookie(COOKIE_NAME, { path: "/" });
+  if (user) {
+    auditLog("admin.logout", user.sub, req);
+  }
+  res.json({ ok: true });
+});
+
+// Admin Me
+apiRouter.get("/admin/me", requireAdmin, (req, res) => {
+  const user = (req as any).user;
+  res.json({
+    username: user.sub,
+    role: user.role,
+    two_factor_enabled: !!(adminSecurity.enabled && adminSecurity.secret),
+  });
+});
+
+// Audit Log: Reads from MongoDB or memory fallback
+apiRouter.get("/audit-log", requireAdmin, async (req, res) => {
+  const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 100, 500));
+  const skip = Math.max(0, parseInt(req.query.skip as string) || 0);
+  const action = req.query.action as string;
+
+  try {
+    const db = await getDb();
+    if (db) {
+      const filter: any = {};
+      if (action) filter.action = action;
+      const total = await db.collection("admin_audit_logs").countDocuments(filter);
+      const items = await db.collection("admin_audit_logs")
+        .find(filter)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+      return res.json({ total, items, limit, skip });
+    }
+  } catch (e) {
+    console.warn("[MongoDB] Audit log query fallback to memory:", e);
+  }
+
+  const filtered = action ? auditLogs.filter((l) => l.action === action) : auditLogs;
+  const items = filtered.slice(skip, skip + limit);
+  res.json({ total: filtered.length, items, limit, skip });
+});
+
+// 2FA Status
+apiRouter.get("/admin/2fa/status", requireAdmin, (req, res) => {
+  res.json({ enabled: !!(adminSecurity.enabled && adminSecurity.secret) });
+});
+
+// 2FA Setup
+apiRouter.post("/admin/2fa/setup", requireAdmin, async (req, res) => {
+  const secret = speakeasy.generateSecret({
+    length: 20,
+    name: `Junior DPS Darbhanga (${ADMIN_USERNAME})`,
+    issuer: TOTP_ISSUER,
   });
 
-  // 2FA Disable
-  apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
-    const { code } = req.body || {};
-    if (!adminSecurity.enabled || !adminSecurity.secret) {
-      return res.status(400).json({ detail: "2FA is not enabled." });
-    }
-    const isValid = authenticator.verify({ token: (code || "").toString().trim(), secret: adminSecurity.secret });
-    if (!isValid) {
-      return res.status(400).json({ detail: "Invalid code. Provide the current authenticator code to disable." });
-    }
-    adminSecurity.enabled = false;
-    adminSecurity.secret = null;
-    const db = await getDb();
-    if (db) {
-      try {
-        await db.collection("admin_settings").updateOne(
-          { _id: "security" as any },
-          { $set: { secret: null, enabled: false, updated_at: new Date() } },
-          { upsert: true }
-        );
-      } catch (err) {
-        console.error("[MongoDB] Failed to persist 2FA disable:", err);
-      }
-    }
-    auditLog("admin.2fa_disabled", (req as any).user?.sub, req);
-    res.json({ ok: true, enabled: false });
+  const uri = secret.otpauth_url || "";
+  const qr_data_url = await QRCode.toDataURL(uri);
+
+  adminSecurity.secret = secret.base32;
+  adminSecurity.enabled = false;
+
+  await auditLog("admin.2fa_setup_started", (req as any).user?.sub, req);
+  res.json({ secret: secret.base32, otpauth_uri: uri, qr_data_url, issuer: TOTP_ISSUER });
+});
+
+// 2FA Enable
+apiRouter.post("/admin/2fa/enable", requireAdmin, async (req, res) => {
+  const { code } = req.body || {};
+  if (!adminSecurity.secret) {
+    return res.status(400).json({ detail: "Run setup first." });
+  }
+  const isValid = speakeasy.totp.verify({
+    secret: adminSecurity.secret,
+    encoding: "base32",
+    token: (code || "").toString().trim(),
+    window: 1,
   });
+  if (!isValid) {
+    return res.status(400).json({ detail: "Invalid or expired code." });
+  }
+  adminSecurity.enabled = true;
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.collection("admin_settings").updateOne(
+        { _id: "security" as any },
+        { $set: { secret: adminSecurity.secret, enabled: true, updated_at: new Date() } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error("[MongoDB] Failed to persist 2FA enable:", err);
+    }
+  }
+  await auditLog("admin.2fa_enabled", (req as any).user?.sub, req);
+  res.json({ ok: true, enabled: true });
+});
+
+// 2FA Disable
+apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
+  const { code } = req.body || {};
+  if (!adminSecurity.enabled || !adminSecurity.secret) {
+    return res.status(400).json({ detail: "2FA is not enabled." });
+  }
+  const isValid = speakeasy.totp.verify({
+    secret: adminSecurity.secret,
+    encoding: "base32",
+    token: (code || "").toString().trim(),
+    window: 1,
+  });
+  if (!isValid) {
+    return res.status(400).json({ detail: "Invalid code. Provide your current authenticator code to disable." });
+  }
+  adminSecurity.enabled = false;
+  adminSecurity.secret = null;
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.collection("admin_settings").updateOne(
+        { _id: "security" as any },
+        { $set: { secret: null, enabled: false, updated_at: new Date() } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error("[MongoDB] Failed to persist 2FA disable:", err);
+    }
+  }
+  await auditLog("admin.2fa_disabled", (req as any).user?.sub, req);
+  res.json({ ok: true, enabled: false });
+});
 
   // Password Change
   apiRouter.post("/admin/password/change", requireAdmin, async (req, res) => {
