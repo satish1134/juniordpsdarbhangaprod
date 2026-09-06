@@ -123,13 +123,18 @@ jobs:
               grep -q "^ADMIN_EMAIL=" .env && sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ADMIN_EMAIL|" .env || echo "ADMIN_EMAIL=$ADMIN_EMAIL" >> .env
             fi
 
+            # Enable route_localnet so host localhost traffic cleanly routes to docker-proxy
+            sysctl -w net.ipv4.conf.all.route_localnet=1 2>/dev/null || true
+            sysctl -w net.ipv4.conf.default.route_localnet=1 2>/dev/null || true
+
             # Inspect and adjust docker-compose.prod.yml ports so host Nginx can own port 80 & 443
             echo "=== CURRENT DOCKER-COMPOSE ==="
             cat docker-compose.prod.yml || true
 
-            # Ensure port 80 is not bound by docker-compose, but redirected to 127.0.0.1:3000:3000
-            sed -i -E 's/["'\'']?80:3000["'\'']?/"127.0.0.1:3000:3000"/g' docker-compose.prod.yml || true
-            sed -i -E 's/["'\'']?80:80["'\'']?/"127.0.0.1:3000:3000"/g' docker-compose.prod.yml || true
+            # Ensure port 80/443 is not bound by docker-compose, but redirected away
+            sed -i -E 's/["'\'']?80:3000["'\'']?/"3000:3000"/g' docker-compose.prod.yml || true
+            sed -i -E 's/["'\'']?80:80["'\'']?/"3001:80"/g' docker-compose.prod.yml || true
+            sed -i -E 's/["'\'']?443:443["'\'']?/"3443:443"/g' docker-compose.prod.yml || true
 
             # Ensure docker-compose.prod.yml connects the .env file to the app service
             if [ -f "docker-compose.prod.yml" ]; then
@@ -139,7 +144,7 @@ jobs:
             fi
 
             docker compose -f docker-compose.prod.yml pull app
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker compose -f docker-compose.prod.yml up -d app mongodb
             docker image prune -f
 
             echo "=== RUNNING DOCKER CONTAINERS ==="
@@ -148,7 +153,7 @@ jobs:
             ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null || true
 
             # Configure Nginx virtual host for juniordpsdarbhanga.com and www.juniordpsdarbhanga.com
-            echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MCBkZWZhdWx0X3NlcnZlcjsKICAgIGxpc3RlbiBbOjpdOjgwIGRlZmF1bHRfc2VydmVyOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1IF87CgogICAgbG9jYXRpb24gXn4gLy53ZWxsLWtub3duL2FjbWUtY2hhbGxlbmdlLyB7CiAgICAgICAgZGVmYXVsdF90eXBlICJ0ZXh0L3BsYWluIjsKICAgICAgICByb290IC92YXIvd3d3L2NlcnRib3Q7CiAgICAgICAgYWxsb3cgYWxsOwogICAgfQoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAwOwogICAgICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uICRjb25uZWN0aW9uX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICAgICAgcHJveHlfY2FjaGVfYnlwYXNzICRodHRwX3VwZ3JhZGU7CgogICAgICAgIHByb3h5X2Nvbm5lY3RfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfc2VuZF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9yZWFkX3RpbWVvdXQgNjBzOwogICAgICAgIGNsaWVudF9tYXhfYm9keV9zaXplIDI1TTsKICAgIH0KfQo=" | base64 -d > /etc/nginx/sites-available/juniordps
+            echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKdXBzdHJlYW0gamRwc191cHN0cmVhbSB7CiAgICBzZXJ2ZXIgMTI3LjAuMC4xOjMwMDAgbWF4X2ZhaWxzPTMgZmFpbF90aW1lb3V0PTEwczsKICAgIHNlcnZlciA1LjE3NS4yMTYuMTI1OjMwMDAgYmFja3VwOwp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDgwIGRlZmF1bHRfc2VydmVyOwogICAgbGlzdGVuIFs6Ol06ODAgZGVmYXVsdF9zZXJ2ZXI7CiAgICBzZXJ2ZXJfbmFtZSBqdW5pb3JkcHNkYXJiaGFuZ2EuY29tIHd3dy5qdW5pb3JkcHNkYXJiaGFuZ2EuY29tIDUuMTc1LjIxNi4xMjUgXzsKCiAgICBsb2NhdGlvbiBefiAvLndlbGwta25vd24vYWNtZS1jaGFsbGVuZ2UvIHsKICAgICAgICBkZWZhdWx0X3R5cGUgInRleHQvcGxhaW4iOwogICAgICAgIHJvb3QgL3Zhci93d3cvY2VydGJvdDsKICAgICAgICBhbGxvdyBhbGw7CiAgICB9CgogICAgbG9jYXRpb24gLyB7CiAgICAgICAgcHJveHlfcGFzcyBodHRwOi8vamRwc191cHN0cmVhbTsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiAkY29ubmVjdGlvbl91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byAkc2NoZW1lOwogICAgICAgIHByb3h5X2NhY2hlX2J5cGFzcyAkaHR0cF91cGdyYWRlOwogICAgICAgIHByb3h5X25leHRfdXBzdHJlYW0gZXJyb3IgdGltZW91dCBpbnZhbGlkX2hlYWRlciBodHRwXzUwMiBodHRwXzUwMyBodHRwXzUwNDsKCiAgICAgICAgcHJveHlfY29ubmVjdF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9zZW5kX3RpbWVvdXQgNjBzOwogICAgICAgIHByb3h5X3JlYWRfdGltZW91dCA2MHM7CiAgICAgICAgY2xpZW50X21heF9ib2R5X3NpemUgMjVNOwogICAgfQp9Cg==" | base64 -d > /etc/nginx/sites-available/juniordps
 
             mkdir -p /var/www/certbot/.well-known/acme-challenge /etc/nginx/sites-enabled
             chmod -R 777 /var/www/certbot
@@ -177,7 +182,7 @@ jobs:
 
               # If certificate was issued, activate HTTPS in Nginx
               if [ -f "/etc/letsencrypt/live/juniordpsdarbhanga.com/fullchain.pem" ]; then
-                echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MCBkZWZhdWx0X3NlcnZlcjsKICAgIGxpc3RlbiBbOjpdOjgwIGRlZmF1bHRfc2VydmVyOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1IF87CgogICAgbG9jYXRpb24gLy53ZWxsLWtub3duL2FjbWUtY2hhbGxlbmdlLyB7CiAgICAgICAgcm9vdCAvdmFyL3d3dy9jZXJ0Ym90OwogICAgICAgIHRyeV9maWxlcyAkdXJpID00MDQ7CiAgICB9CgogICAgbG9jYXRpb24gLyB7CiAgICAgICAgcmV0dXJuIDMwMSBodHRwczovLyRob3N0JHJlcXVlc3RfdXJpOwogICAgfQp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDQ0MyBzc2wgaHR0cDIgZGVmYXVsdF9zZXJ2ZXI7CiAgICBsaXN0ZW4gWzo6XTo0NDMgc3NsIGh0dHAyIGRlZmF1bHRfc2VydmVyOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbTsKCiAgICBzc2xfY2VydGlmaWNhdGUgL2V0Yy9sZXRzZW5jcnlwdC9saXZlL2p1bmlvcmRwc2RhcmJoYW5nYS5jb20vZnVsbGNoYWluLnBlbTsKICAgIHNzbF9jZXJ0aWZpY2F0ZV9rZXkgL2V0Yy9sZXRzZW5jcnlwdC9saXZlL2p1bmlvcmRwc2RhcmJoYW5nYS5jb20vcHJpdmtleS5wZW07CiAgICBzc2xfcHJvdG9jb2xzIFRMU3YxLjIgVExTdjEuMzsKICAgIHNzbF9jaXBoZXJzIEhJR0g6IWFOVUxMOiFNRDU7CiAgICBzc2xfcHJlZmVyX3NlcnZlcl9jaXBoZXJzIG9uOwoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAwOwogICAgICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uICRjb25uZWN0aW9uX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvIGh0dHBzOwogICAgICAgIHByb3h5X2NhY2hlX2J5cGFzcyAkaHR0cF91cGdyYWRlOwoKICAgICAgICBwcm94eV9jb25uZWN0X3RpbWVvdXQgNjBzOwogICAgICAgIHByb3h5X3NlbmRfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfcmVhZF90aW1lb3V0IDYwczsKICAgICAgICBjbGllbnRfbWF4X2JvZHlfc2l6ZSAyNU07CiAgICB9Cn0K" | base64 -d > /etc/nginx/sites-available/juniordps
+                echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKdXBzdHJlYW0gamRwc191cHN0cmVhbSB7CiAgICBzZXJ2ZXIgMTI3LjAuMC4xOjMwMDAgbWF4X2ZhaWxzPTMgZmFpbF90aW1lb3V0PTEwczsKICAgIHNlcnZlciA1LjE3NS4yMTYuMTI1OjMwMDAgYmFja3VwOwp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDgwIGRlZmF1bHRfc2VydmVyOwogICAgbGlzdGVuIFs6Ol06ODAgZGVmYXVsdF9zZXJ2ZXI7CiAgICBzZXJ2ZXJfbmFtZSBqdW5pb3JkcHNkYXJiaGFuZ2EuY29tIHd3dy5qdW5pb3JkcHNkYXJiaGFuZ2EuY29tIDUuMTc1LjIxNi4xMjUgXzsKCiAgICBsb2NhdGlvbiAvLndlbGwta25vd24vYWNtZS1jaGFsbGVuZ2UvIHsKICAgICAgICByb290IC92YXIvd3d3L2NlcnRib3Q7CiAgICAgICAgdHJ5X2ZpbGVzICR1cmkgPTQwNDsKICAgIH0KCiAgICBsb2NhdGlvbiAvIHsKICAgICAgICByZXR1cm4gMzAxIGh0dHBzOi8vJGhvc3QkcmVxdWVzdF91cmk7CiAgICB9Cn0KCnNlcnZlciB7CiAgICBsaXN0ZW4gNDQzIHNzbCBodHRwMiBkZWZhdWx0X3NlcnZlcjsKICAgIGxpc3RlbiBbOjpdOjQ0MyBzc2wgaHR0cDIgZGVmYXVsdF9zZXJ2ZXI7CiAgICBzZXJ2ZXJfbmFtZSBqdW5pb3JkcHNkYXJiaGFuZ2EuY29tIHd3dy5qdW5pb3JkcHNkYXJiaGFuZ2EuY29tOwoKICAgIHNzbF9jZXJ0aWZpY2F0ZSAvZXRjL2xldHNlbmNyeXB0L2xpdmUvanVuaW9yZHBzZGFyYmhhbmdhLmNvbS9mdWxsY2hhaW4ucGVtOwogICAgc3NsX2NlcnRpZmljYXRlX2tleSAvZXRjL2xldHNlbmNyeXB0L2xpdmUvanVuaW9yZHBzZGFyYmhhbmdhLmNvbS9wcml2a2V5LnBlbTsKICAgIHNzbF9wcm90b2NvbHMgVExTdjEuMiBUTFN2MS4zOwogICAgc3NsX2NpcGhlcnMgSElHSDohYU5VTEw6IU1ENTsKICAgIHNzbF9wcmVmZXJfc2VydmVyX2NpcGhlcnMgb247CgogICAgbG9jYXRpb24gLyB7CiAgICAgICAgcHJveHlfcGFzcyBodHRwOi8vamRwc191cHN0cmVhbTsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiAkY29ubmVjdGlvbl91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgICAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKICAgICAgICBwcm94eV9uZXh0X3Vwc3RyZWFtIGVycm9yIHRpbWVvdXQgaW52YWxpZF9oZWFkZXIgaHR0cF81MDIgaHR0cF81MDMgaHR0cF81MDQ7CgogICAgICAgIHByb3h5X2Nvbm5lY3RfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfc2VuZF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9yZWFkX3RpbWVvdXQgNjBzOwogICAgICAgIGNsaWVudF9tYXhfYm9keV9zaXplIDI1TTsKICAgIH0KfQo=" | base64 -d > /etc/nginx/sites-available/juniordps
                 nginx -t && (systemctl restart nginx 2>/dev/null || systemctl start nginx 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
                 echo "✓ SSL Certificate successfully installed and Nginx reloaded for HTTPS!"
               else
@@ -188,4 +193,9 @@ jobs:
               echo "DNS for juniordpsdarbhanga.com has not yet propagated to 5.175.216.125. Skipping Certbot until DNS is pointed."
               nginx -t && (systemctl restart nginx 2>/dev/null || systemctl start nginx 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
             fi
+
+            echo "=== TESTING NGINX AND UPSTREAM ==="
+            sleep 2
+            curl -I http://127.0.0.1:3000 || true
+            curl -I https://juniordpsdarbhanga.com || true
 
