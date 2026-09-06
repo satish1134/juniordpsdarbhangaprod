@@ -123,6 +123,14 @@ jobs:
               grep -q "^ADMIN_EMAIL=" .env && sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ADMIN_EMAIL|" .env || echo "ADMIN_EMAIL=$ADMIN_EMAIL" >> .env
             fi
 
+            # Inspect and adjust docker-compose.prod.yml ports so host Nginx can own port 80 & 443
+            echo "=== CURRENT DOCKER-COMPOSE ==="
+            cat docker-compose.prod.yml || true
+
+            # Ensure port 80 is not bound by docker-compose, but redirected to 127.0.0.1:3000:3000
+            sed -i -E 's/["'\'']?80:3000["'\'']?/"127.0.0.1:3000:3000"/g' docker-compose.prod.yml || true
+            sed -i -E 's/["'\'']?80:80["'\'']?/"127.0.0.1:3000:3000"/g' docker-compose.prod.yml || true
+
             # Ensure docker-compose.prod.yml connects the .env file to the app service
             if [ -f "docker-compose.prod.yml" ]; then
               if ! grep -q "env_file:" docker-compose.prod.yml; then
@@ -131,8 +139,13 @@ jobs:
             fi
 
             docker compose -f docker-compose.prod.yml pull app
-            docker compose -f docker-compose.prod.yml up -d app
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
+
+            echo "=== RUNNING DOCKER CONTAINERS ==="
+            docker ps || true
+            echo "=== LISTENING PORTS ==="
+            ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null || true
 
             # Configure Nginx virtual host for juniordpsdarbhanga.com and www.juniordpsdarbhanga.com
             echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MCBkZWZhdWx0X3NlcnZlcjsKICAgIGxpc3RlbiBbOjpdOjgwIGRlZmF1bHRfc2VydmVyOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1IF87CgogICAgbG9jYXRpb24gXn4gLy53ZWxsLWtub3duL2FjbWUtY2hhbGxlbmdlLyB7CiAgICAgICAgZGVmYXVsdF90eXBlICJ0ZXh0L3BsYWluIjsKICAgICAgICByb290IC92YXIvd3d3L2NlcnRib3Q7CiAgICAgICAgYWxsb3cgYWxsOwogICAgfQoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAwOwogICAgICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uICRjb25uZWN0aW9uX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICAgICAgcHJveHlfY2FjaGVfYnlwYXNzICRodHRwX3VwZ3JhZGU7CgogICAgICAgIHByb3h5X2Nvbm5lY3RfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfc2VuZF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9yZWFkX3RpbWVvdXQgNjBzOwogICAgICAgIGNsaWVudF9tYXhfYm9keV9zaXplIDI1TTsKICAgIH0KfQo=" | base64 -d > /etc/nginx/sites-available/juniordps
