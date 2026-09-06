@@ -12,9 +12,18 @@ const Footer = () => {
   const display = content.display || {};
   const footer = content.footer || {};
   const socials = footer.socials || {};
-  const quickLinks = Array.isArray(footer.quick_links) && footer.quick_links.length
+  const rawQuickLinks = Array.isArray(footer.quick_links) && footer.quick_links.length
     ? footer.quick_links
     : [{ label: "Fee Structure", href: "/fees" }, { label: "School Calendar", href: "/calendar" }];
+  const quickLinks = rawQuickLinks.map((l) => {
+    if (l && typeof l.label === "string" && l.label.toLowerCase().includes("parent login")) {
+      return { label: "Webmail Login", href: "https://mail.zoho.com", isWebmail: true };
+    }
+    return l;
+  });
+  if (!quickLinks.some((l) => l.label && l.label.toLowerCase().includes("webmail"))) {
+    quickLinks.push({ label: "Webmail Login", href: "https://mail.zoho.com", isWebmail: true });
+  }
   const socialIcons = [
     { key: "facebook", Icon: Facebook },
     { key: "instagram", Icon: Instagram },
@@ -110,26 +119,32 @@ const Footer = () => {
           <div className="lg:col-span-3">
             <div className="text-[11px] tracking-[0.3em] uppercase text-[#c99f3b] font-semibold">Quick Links</div>
             <ul className="mt-5 space-y-3">
-              {quickLinks.map((l, i) => (
-                <li key={i}>
-                  {l.href && l.href.startsWith("/") ? (
-                    <Link to={l.href} className="text-[14.5px] text-[#fff9e6]/75 hover:text-[#c99f3b] transition">{l.label}</Link>
-                  ) : (
-                    <a href={l.href || "#"} className="text-[14.5px] text-[#fff9e6]/75 hover:text-[#c99f3b] transition">{l.label}</a>
-                  )}
-                </li>
-              ))}
-              <li>
-                <a
-                  href="https://mail.zoho.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[14.5px] text-[#c99f3b] font-semibold hover:text-[#dfb552] transition"
-                  title="Official Staff and Faculty Webmail Portal"
-                >
-                  <Mail className="w-3.5 h-3.5" /> Webmail Login ↗
-                </a>
-              </li>
+              {quickLinks.map((l, i) => {
+                const isWebmail = l.isWebmail || (l.label && l.label.toLowerCase().includes("webmail"));
+                const isExternal = isWebmail || (l.href && (l.href.startsWith("http://") || l.href.startsWith("https://")));
+                return (
+                  <li key={i}>
+                    {isExternal ? (
+                      <a
+                        href={l.href || "https://mail.zoho.com"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`inline-flex items-center gap-1.5 text-[14.5px] transition ${
+                          isWebmail ? "text-[#c99f3b] font-semibold hover:text-[#dfb552]" : "text-[#fff9e6]/75 hover:text-[#c99f3b]"
+                        }`}
+                        title={isWebmail ? "Official Staff and Faculty Webmail Portal (Zoho)" : l.label}
+                      >
+                        {isWebmail && <Mail className="w-3.5 h-3.5" />}
+                        {l.label} ↗
+                      </a>
+                    ) : l.href && l.href.startsWith("/") ? (
+                      <Link to={l.href} className="text-[14.5px] text-[#fff9e6]/75 hover:text-[#c99f3b] transition">{l.label}</Link>
+                    ) : (
+                      <a href={l.href || "#"} className="text-[14.5px] text-[#fff9e6]/75 hover:text-[#c99f3b] transition">{l.label}</a>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
 

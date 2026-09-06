@@ -701,7 +701,7 @@ const DEFAULT_CONTENT: Record<string, any> = {
       { label: "School Calendar", href: "/calendar" },
       { label: "Transport Policies", href: "/transport" },
       { label: "Uniform Guidelines", href: "#" },
-      { label: "Parent Login", href: "#" },
+      { label: "Webmail Login", href: "https://mail.zoho.com" },
       { label: "Career with us", href: "/careers" },
     ],
   },
@@ -1020,6 +1020,8 @@ apiRouter.get("/health", async (req, res) => {
   const db = await getDb();
   res.json({
     status: "ok",
+    version: "2026.09.06-webmail-official-mailbox-v2",
+    features: ["official-mailbox", "webmail-login", "admin-quick-access"],
     database: !!db ? "connected" : "disconnected",
     timestamp: new Date().toISOString(),
   });
@@ -2321,6 +2323,15 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
       }
     }
 
+    if (result.footer && Array.isArray(result.footer.quick_links)) {
+      result.footer.quick_links = result.footer.quick_links.map((l: any) => {
+        if (l && typeof l.label === "string" && l.label.toLowerCase().includes("parent login")) {
+          return { label: "Webmail Login", href: "https://mail.zoho.com" };
+        }
+        return l;
+      });
+    }
+
     res.json(result);
   });
 
@@ -2497,6 +2508,9 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
       const distPath = path.join(process.cwd(), "dist");
       app.use(express.static(distPath));
       app.get("*", (req, res) => {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
         res.sendFile(path.join(distPath, "index.html"));
       });
       app.listen(PORT, "0.0.0.0", () => {

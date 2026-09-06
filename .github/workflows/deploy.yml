@@ -127,34 +127,64 @@ jobs:
             sysctl -w net.ipv4.conf.all.route_localnet=1 2>/dev/null || true
             sysctl -w net.ipv4.conf.default.route_localnet=1 2>/dev/null || true
 
-            # Inspect and adjust docker-compose.prod.yml ports so host Nginx can own port 80 & 443
-            echo "=== CURRENT DOCKER-COMPOSE ==="
-            cat docker-compose.prod.yml || true
+            # Write authoritative docker-compose.prod.yml to ensure correct image and port binding
+            cat <<'EOF_COMPOSE' > docker-compose.prod.yml
+version: '3.8'
 
-            # Ensure port 80/443 is not bound by docker-compose, but redirected away
-            sed -i -E 's/["'\'']?80:3000["'\'']?/"3000:3000"/g' docker-compose.prod.yml || true
-            sed -i -E 's/["'\'']?80:80["'\'']?/"3001:80"/g' docker-compose.prod.yml || true
-            sed -i -E 's/["'\'']?443:443["'\'']?/"3443:443"/g' docker-compose.prod.yml || true
+services:
+  app:
+    image: ghcr.io/satish1134/juniordpsdarbhangaprod:latest
+    container_name: juniordps_app
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongodb
 
-            # Ensure docker-compose.prod.yml connects the .env file to the app service
-            if [ -f "docker-compose.prod.yml" ]; then
-              if ! grep -q "env_file:" docker-compose.prod.yml; then
-                sed -i '/app:/a \    env_file:\n      - .env' docker-compose.prod.yml
-              fi
+  mongodb:
+    image: mongo:6.0
+    container_name: juniordps_mongodb
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
+EOF_COMPOSE
+
+            echo "=== PULLING LATEST DOCKER IMAGE FROM GHCR ==="
+            docker pull ghcr.io/satish1134/juniordpsdarbhangaprod:latest
+
+            echo "=== CHECKING FOR RUNNING PM2 / NODE HOST PROCESSES ON 3000 ==="
+            if command -v pm2 >/dev/null 2>&1; then
+              echo "Stopping PM2 background processes to prevent port 3000 conflicts..."
+              pm2 stop all 2>/dev/null || true
             fi
 
-            echo "Pulling latest app image from ghcr.io..."
-            docker compose -f docker-compose.prod.yml pull app
-            echo "Forcing recreation of app container with newest image..."
-            docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps app
-            docker compose -f docker-compose.prod.yml up -d mongodb
-            docker compose -f docker-compose.prod.yml restart app
+            echo "=== RECREATING CONTAINERS WITH FRESH IMAGE ==="
+            docker stop juniordps_app 2>/dev/null || true
+            docker rm -f juniordps_app 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml up -d --force-recreate app mongodb
             docker image prune -f
 
             echo "=== RUNNING DOCKER CONTAINERS ==="
             docker ps || true
             echo "=== LISTENING PORTS ==="
             ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null || true
+
+            echo "=== WAITING AND VERIFYING CONTAINER HEALTH ==="
+            for i in 1 2 3 4 5 6; do
+              sleep 2
+              HEALTH=$(curl -s http://127.0.0.1:3000/api/health || true)
+              if echo "$HEALTH" | grep -q "official-mailbox"; then
+                echo "✓ SUCCESS: New application container running with official-mailbox! Response: $HEALTH"
+                break
+              else
+                echo "Attempt $i: Waiting for container to respond... got: $HEALTH"
+              fi
+            done
 
             # Configure Nginx virtual host for juniordpsdarbhanga.com and www.juniordpsdarbhanga.com
             echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAiIiBjbG9zZTsKfQoKdXBzdHJlYW0gamRwc191cHN0cmVhbSB7CiAgICBzZXJ2ZXIgNS4xNzUuMjE2LjEyNTozMDAwIG1heF9mYWlscz0zIGZhaWxfdGltZW91dD0xMHM7CiAgICBzZXJ2ZXIgMTI3LjAuMC4xOjMwMDAgYmFja3VwOwogICAga2VlcGFsaXZlIDMyOwp9CgojIENhdGNoLWFsbDogcmVqZWN0IGRpcmVjdCBJUCBhY2Nlc3Mgb24gUG9ydCA4MApzZXJ2ZXIgewogICAgbGlzdGVuIDgwIGRlZmF1bHRfc2VydmVyOwogICAgbGlzdGVuIFs6Ol06ODAgZGVmYXVsdF9zZXJ2ZXI7CiAgICBzZXJ2ZXJfbmFtZSBfOwoKICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgIHJvb3QgL3Zhci93d3cvY2VydGJvdDsKICAgICAgICB0cnlfZmlsZXMgJHVyaSA9NDA0OwogICAgfQoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHJldHVybiA0MDQ7CiAgICB9Cn0KCiMgSnVuaW9yIERQUyBkb21haW4gb24gUG9ydCA4MApzZXJ2ZXIgewogICAgbGlzdGVuIDgwOwogICAgbGlzdGVuIFs6Ol06ODA7CiAgICBzZXJ2ZXJfbmFtZSBqdW5pb3JkcHNkYXJiaGFuZ2EuY29tIHd3dy5qdW5pb3JkcHNkYXJiaGFuZ2EuY29tOwoKICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgIHJvb3QgL3Zhci93d3cvY2VydGJvdDsKICAgICAgICB0cnlfZmlsZXMgJHVyaSA9NDA0OwogICAgfQoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovL2pkcHNfdXBzdHJlYW07CiAgICAgICAgcHJveHlfaHR0cF92ZXJzaW9uIDEuMTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFVwZ3JhZGUgJGh0dHBfdXBncmFkZTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIENvbm5lY3Rpb24gJGNvbm5lY3Rpb25fdXBncmFkZTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtRm9yICRwcm94eV9hZGRfeF9mb3J3YXJkZWRfZm9yOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gJHNjaGVtZTsKICAgICAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKICAgICAgICBwcm94eV9uZXh0X3Vwc3RyZWFtIGVycm9yIHRpbWVvdXQgaW52YWxpZF9oZWFkZXIgaHR0cF81MDIgaHR0cF81MDMgaHR0cF81MDQ7CgogICAgICAgIHByb3h5X2Nvbm5lY3RfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfc2VuZF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9yZWFkX3RpbWVvdXQgNjBzOwogICAgICAgIGNsaWVudF9tYXhfYm9keV9zaXplIDI1TTsKICAgIH0KfQo=" | base64 -d > /etc/nginx/sites-available/juniordps

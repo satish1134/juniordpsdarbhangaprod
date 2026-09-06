@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  app:
+    image: ghcr.io/satish1134/juniordpsdarbhangaprod:latest
+    container_name: juniordps_app
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongodb
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || curl -f http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  mongodb:
+    image: mongo:6.0
+    container_name: juniordps_mongodb
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
