@@ -119,6 +119,17 @@ const Footer = () => {
                   )}
                 </li>
               ))}
+              <li>
+                <a
+                  href="https://mail.zoho.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[14.5px] text-[#c99f3b] font-semibold hover:text-[#dfb552] transition"
+                  title="Official Staff and Faculty Webmail Portal"
+                >
+                  <Mail className="w-3.5 h-3.5" /> Webmail Login ↗
+                </a>
+              </li>
             </ul>
           </div>
 
@@ -145,7 +156,16 @@ const Footer = () => {
           <p className="text-[13px] text-[#fff9e6]/60">
             © {new Date().getFullYear()} Junior DPS Darbhanga. All rights reserved.
           </p>
-          <div className="flex items-center gap-6 text-[13px] text-[#fff9e6]/60">
+          <div className="flex flex-wrap items-center gap-5 text-[13px] text-[#fff9e6]/60">
+            <a
+              href="https://mail.zoho.com"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#c99f3b]/15 border border-[#c99f3b]/30 text-[#c99f3b] hover:bg-[#c99f3b] hover:text-[#0a3d29] font-semibold transition"
+              title="Official Zoho Webmail Login for School Staff & Teachers"
+            >
+              <Mail className="w-3.5 h-3.5" /> Webmail Login (Zoho)
+            </a>
             <Link to="/privacy" className="hover:text-[#c99f3b] transition">Privacy Policy</Link>
             <Link to="/terms" className="hover:text-[#c99f3b] transition">Terms of Use</Link>
             <a href="#" className="hover:text-[#c99f3b] transition">Sitemap</a>

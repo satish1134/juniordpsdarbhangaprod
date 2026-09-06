@@ -75,9 +75,20 @@ const Navbar = ({ onEnquiry }) => {
             <span className="flex items-center gap-2"><Phone className="w-3.5 h-3.5" /> {schoolInfo.phone}</span>
             <span className="flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> {schoolInfo.email}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <MapPin className="w-3.5 h-3.5" />
-            <span className="opacity-90">{schoolInfo.address}</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-3.5 h-3.5" />
+              <span className="opacity-90">{schoolInfo.address}</span>
+            </div>
+            <a
+              href="https://mail.zoho.com"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-[#c99f3b] text-[#0a3d29] font-bold text-[11.5px] hover:bg-[#dfb552] transition shadow-sm ml-2"
+              title="Official Staff and Faculty Webmail (Zoho)"
+            >
+              <Mail className="w-3 h-3" /> Webmail Login
+            </a>
           </div>
         </div>
       </div>
@@ -174,12 +185,23 @@ const Navbar = ({ onEnquiry }) => {
                 )}
               </div>
             )}
-            <Button
-              onClick={onEnquiry}
-              className="bg-[#0a5f3d] hover:bg-[#084a30] text-[#fff9e6] rounded-full px-6 h-11 font-semibold shadow-lg shadow-[#0a5f3d]/20"
-            >
-              Apply for Admission
-            </Button>
+            <div className="flex items-center gap-2">
+              <a
+                href="https://mail.zoho.com"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-4 h-11 rounded-full border border-[#0a5f3d]/25 text-[#0a5f3d] font-semibold text-[13.5px] hover:bg-[#0a5f3d]/5 hover:border-[#0a5f3d] transition"
+                title="Official Webmail Login (Zoho)"
+              >
+                <Mail className="w-4 h-4 text-[#c99f3b]" /> Webmail
+              </a>
+              <Button
+                onClick={onEnquiry}
+                className="bg-[#0a5f3d] hover:bg-[#084a30] text-[#fff9e6] rounded-full px-6 h-11 font-semibold shadow-lg shadow-[#0a5f3d]/20"
+              >
+                Apply for Admission
+              </Button>
+            </div>
           </div>
 
           <button
@@ -215,9 +237,17 @@ const Navbar = ({ onEnquiry }) => {
                   </Link>
                 )
               )}
+              <a
+                href="https://mail.zoho.com"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 flex items-center justify-center gap-2 rounded-full border border-[#c99f3b] bg-[#c99f3b]/10 text-[#0a3d29] h-11 font-semibold text-[14px]"
+              >
+                <Mail className="w-4 h-4 text-[#c99f3b]" /> Official Webmail Login (Zoho)
+              </a>
               <Button
                 onClick={() => { setOpen(false); onEnquiry(); }}
-                className="mt-4 bg-[#0a5f3d] hover:bg-[#084a30] text-[#fff9e6] rounded-full h-11 font-semibold"
+                className="mt-2 bg-[#0a5f3d] hover:bg-[#084a30] text-[#fff9e6] rounded-full h-11 font-semibold"
               >
                 Apply for Admission
               </Button>

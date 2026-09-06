@@ -143,8 +143,12 @@ jobs:
               fi
             fi
 
+            echo "Pulling latest app image from ghcr.io..."
             docker compose -f docker-compose.prod.yml pull app
-            docker compose -f docker-compose.prod.yml up -d app mongodb
+            echo "Forcing recreation of app container with newest image..."
+            docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps app
+            docker compose -f docker-compose.prod.yml up -d mongodb
+            docker compose -f docker-compose.prod.yml restart app
             docker image prune -f
 
             echo "=== RUNNING DOCKER CONTAINERS ==="

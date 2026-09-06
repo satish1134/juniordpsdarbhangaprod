@@ -1,6 +1,6 @@
 import React from "react";
 import { useContent } from "../lib/ContentContext";
-import { Smartphone, CheckCircle2, ExternalLink } from "lucide-react";
+import { Smartphone, CheckCircle2, ExternalLink, Mail } from "lucide-react";
 
 // Rendered on the home page only if `mobile_app.enabled` is true AND at least one link is set.
 const MobileAppSection = () => {
@@ -86,6 +86,15 @@ const MobileAppSection = () => {
                 <ExternalLink className="w-4 h-4" /> Open in browser
               </a>
             )}
+            <a
+              href="https://mail.zoho.com"
+              target="_blank"
+              rel="noreferrer"
+              className="group flex items-center gap-2.5 rounded-2xl bg-[#c99f3b] hover:bg-[#dfb552] text-[#0a3d29] px-5 py-3 font-bold transition-all shadow-md"
+              title="Official School Staff Webmail Login"
+            >
+              <Mail className="w-4 h-4" /> Webmail Login ↗
+            </a>
           </div>
         </div>
 

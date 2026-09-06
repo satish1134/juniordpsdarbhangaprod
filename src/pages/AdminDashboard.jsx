@@ -233,6 +233,15 @@ const AdminDashboard = () => {
                 {dbStatus.connected ? "MongoDB Atlas Active" : "In-Memory Mode"}
               </div>
             )}
+            <a
+              href="https://mail.zoho.com"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#c99f3b] text-[#0a3d29] font-bold text-[12px] hover:bg-[#dfb552] transition shadow-md"
+              title="Open Official Zoho Webmail in a new tab"
+            >
+              <Mail className="w-3.5 h-3.5" /> Webmail Login ↗
+            </a>
             <Link to="/" className="hidden sm:flex items-center gap-2 text-[13px] text-[#fff9e6]/80 hover:text-[#c99f3b]">
               <ExternalLink className="w-3.5 h-3.5" /> View site
             </Link>
