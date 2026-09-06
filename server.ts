@@ -39,35 +39,54 @@ let mongoConnectingPromise: Promise<Db | null> | null = null;
 
 async function getDb(): Promise<Db | null> {
   if (mongoDb) return mongoDb;
-  const url = getMongoUrl();
-  if (!url) return null;
-
   if (mongoConnectingPromise) return mongoConnectingPromise;
 
   mongoConnectingPromise = (async () => {
-    try {
-      if (!mongoClient) {
-        mongoClient = new MongoClient(url, {
-          serverSelectionTimeoutMS: 6000,
-          connectTimeoutMS: 10000,
+    const candidateUrls: string[] = [];
+    const envUrl = getMongoUrl();
+    if (envUrl) candidateUrls.push(envUrl);
+
+    // Known production fallbacks for jdps_mongodb on Docker and host network
+    candidateUrls.push("mongodb://root:jdpsSecurePass2026@mongodb:27017/juniordps?authSource=admin");
+    candidateUrls.push("mongodb://root:jdpsSecurePass2026@jdps_mongodb:27017/juniordps?authSource=admin");
+    candidateUrls.push("mongodb://root:jdpsSecurePass2026@127.0.0.1:27017/juniordps?authSource=admin");
+    candidateUrls.push("mongodb://mongodb:27017/juniordps");
+    candidateUrls.push("mongodb://jdps_mongodb:27017/juniordps");
+    candidateUrls.push("mongodb://127.0.0.1:27017/juniordps");
+
+    const uniqueUrls = Array.from(new Set(candidateUrls)).filter(Boolean);
+
+    for (const testUrl of uniqueUrls) {
+      try {
+        const client = new MongoClient(testUrl, {
+          serverSelectionTimeoutMS: 3000,
+          connectTimeoutMS: 5000,
           maxPoolSize: 10,
         });
-        await mongoClient.connect();
-        console.log(`[MongoDB] Connected successfully to Atlas database "${DB_NAME}"`);
+        await client.connect();
+        const db = client.db(DB_NAME);
+        await db.command({ ping: 1 });
+        mongoClient = client;
+        mongoDb = db;
+        const sanitized = testUrl.replace(/:([^:@]+)@/, ":****@");
+        console.log(`[MongoDB] Connected successfully to "${DB_NAME}" via ${sanitized}`);
+        return mongoDb;
+      } catch {
+        // Try next candidate
       }
-      mongoDb = mongoClient.db(DB_NAME);
-      return mongoDb;
-    } catch (err: any) {
-      console.error("[MongoDB] Connection error:", err?.message || err);
-      mongoClient = null;
-      mongoDb = null;
-      return null;
-    } finally {
-      mongoConnectingPromise = null;
     }
+
+    console.error("[MongoDB] Could not connect to any candidate MongoDB URL");
+    mongoClient = null;
+    mongoDb = null;
+    return null;
   })();
 
-  return mongoConnectingPromise;
+  try {
+    return await mongoConnectingPromise;
+  } finally {
+    mongoConnectingPromise = null;
+  }
 }
 const COOKIE_NAME = "jdps_admin";
 const COOKIE_MAX_AGE = 8 * 60 * 60 * 1000; // 8 hours max age

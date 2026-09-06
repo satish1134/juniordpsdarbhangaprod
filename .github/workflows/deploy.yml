@@ -99,7 +99,7 @@ jobs:
             if [ -n "$MONGO_URI" ]; then
               grep -q "^MONGO_URI=" .env && sed -i "s|^MONGO_URI=.*|MONGO_URI=$MONGO_URI|" .env || echo "MONGO_URI=$MONGO_URI" >> .env
             else
-              grep -q "^MONGO_URI=" .env || echo "MONGO_URI=mongodb://mongodb:27017/juniordps" >> .env
+              grep -q "^MONGO_URI=" .env || echo "MONGO_URI=mongodb://root:jdpsSecurePass2026@mongodb:27017/juniordps?authSource=admin" >> .env
             fi
 
             if [ -n "$RESEND_API_KEY" ]; then
@@ -127,8 +127,8 @@ jobs:
             sysctl -w net.ipv4.conf.all.route_localnet=1 2>/dev/null || true
             sysctl -w net.ipv4.conf.default.route_localnet=1 2>/dev/null || true
 
-            # Write authoritative docker-compose.prod.yml to ensure correct image and port binding
-            echo "dmVyc2lvbjogJzMuOCcKCnNlcnZpY2VzOgogIGFwcDoKICAgIGltYWdlOiBnaGNyLmlvL3NhdGlzaDExMzQvanVuaW9yZHBzZGFyYmhhbmdhcHJvZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBqdW5pb3JkcHNfYXBwCiAgICByZXN0YXJ0OiBhbHdheXMKICAgIGVudl9maWxlOgogICAgICAtIC5lbnYKICAgIHBvcnRzOgogICAgICAtICIzMDAwOjMwMDAiCiAgICBkZXBlbmRzX29uOgogICAgICAtIG1vbmdvZGIKICAgIGhlYWx0aGNoZWNrOgogICAgICB0ZXN0OiBbIkNNRC1TSEVMTCIsICJ3Z2V0IC1xTy0gaHR0cDovLzEyNy4wLjAuMTozMDAwL2FwaS9oZWFsdGggfHwgY3VybCAtZiBodHRwOi8vMTI3LjAuMC4xOjMwMDAvYXBpL2hlYWx0aCB8fCBleGl0IDEiXQogICAgICBpbnRlcnZhbDogMTVzCiAgICAgIHRpbWVvdXQ6IDVzCiAgICAgIHJldHJpZXM6IDMKCiAgbW9uZ29kYjoKICAgIGltYWdlOiBtb25nbzo2LjAKICAgIGNvbnRhaW5lcl9uYW1lOiBqdW5pb3JkcHNfbW9uZ29kYgogICAgcmVzdGFydDogYWx3YXlzCiAgICB2b2x1bWVzOgogICAgICAtIG1vbmdvX2RhdGE6L2RhdGEvZGIKCnZvbHVtZXM6CiAgbW9uZ29fZGF0YToK" | base64 -d > docker-compose.prod.yml
+            # Write authoritative docker-compose.prod.yml with persistent mongo_data and jdps_network
+            echo "dmVyc2lvbjogJzMuOCcKCnNlcnZpY2VzOgogIG1vbmdvZGI6CiAgICBpbWFnZTogbW9uZ286Ny4wCiAgICBjb250YWluZXJfbmFtZTogamRwc19tb25nb2RiCiAgICByZXN0YXJ0OiBhbHdheXMKICAgIGVudmlyb25tZW50OgogICAgICBNT05HT19JTklUREJfUk9PVF9VU0VSTkFNRTogcm9vdAogICAgICBNT05HT19JTklUREJfUk9PVF9QQVNTV09SRDogamRwc1NlY3VyZVBhc3MyMDI2CiAgICB2b2x1bWVzOgogICAgICAtIG1vbmdvX2RhdGE6L2RhdGEvZGIKICAgIG5ldHdvcmtzOgogICAgICAtIGpkcHNfbmV0d29yawogICAgaGVhbHRoY2hlY2s6CiAgICAgIHRlc3Q6IFsiQ01EIiwgIm1vbmdvc2giLCAiLS1ldmFsIiwgImRiLmFkbWluQ29tbWFuZCgncGluZycpIl0KICAgICAgaW50ZXJ2YWw6IDEwcwogICAgICB0aW1lb3V0OiA1cwogICAgICByZXRyaWVzOiA1CgogIGFwcDoKICAgIGltYWdlOiBnaGNyLmlvL3NhdGlzaDExMzQvanVuaW9yZHBzZGFyYmhhbmdhcHJvZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBqZHBzX2FwcAogICAgcmVzdGFydDogYWx3YXlzCiAgICBlbnZfZmlsZToKICAgICAgLSAuZW52CiAgICBwb3J0czoKICAgICAgLSAiMzAwMDozMDAwIgogICAgZGVwZW5kc19vbjoKICAgICAgbW9uZ29kYjoKICAgICAgICBjb25kaXRpb246IHNlcnZpY2VfaGVhbHRoeQogICAgbmV0d29ya3M6CiAgICAgIC0gamRwc19uZXR3b3JrCgpuZXR3b3JrczoKICBqZHBzX25ldHdvcms6CiAgICBuYW1lOiBqZHBzX25ldHdvcmsKCnZvbHVtZXM6CiAgbW9uZ29fZGF0YToKCg==" | base64 -d > docker-compose.prod.yml
 
             echo "=== PULLING LATEST DOCKER IMAGE FROM GHCR ==="
             docker pull ghcr.io/satish1134/juniordpsdarbhangaprod:latest
@@ -139,10 +139,11 @@ jobs:
               pm2 stop all 2>/dev/null || true
             fi
 
-            echo "=== RECREATING CONTAINERS WITH FRESH IMAGE ==="
-            docker stop juniordps_app 2>/dev/null || true
-            docker rm -f juniordps_app 2>/dev/null || true
-            docker compose -f docker-compose.prod.yml up -d --force-recreate app mongodb
+            echo "=== CLEANING UP TEMPORARY CONTAINERS & ENSURING MONGODB RUNS ==="
+            docker stop juniordps_app juniordps_mongodb 2>/dev/null || true
+            docker rm -f juniordps_app juniordps_mongodb 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml up -d mongodb
+            docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps app
             docker image prune -f
 
             echo "=== RUNNING DOCKER CONTAINERS ==="

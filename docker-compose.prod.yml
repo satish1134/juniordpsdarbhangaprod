@@ -1,28 +1,41 @@
 version: '3.8'
 
 services:
+  mongodb:
+    image: mongo:7.0
+    container_name: jdps_mongodb
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: jdpsSecurePass2026
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - jdps_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     image: ghcr.io/satish1134/juniordpsdarbhangaprod:latest
-    container_name: juniordps_app
+    container_name: jdps_app
     restart: always
     env_file:
       - .env
     ports:
       - "3000:3000"
     depends_on:
-      - mongodb
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || curl -f http://127.0.0.1:3000/api/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
+      mongodb:
+        condition: service_healthy
+    networks:
+      - jdps_network
 
-  mongodb:
-    image: mongo:6.0
-    container_name: juniordps_mongodb
-    restart: always
-    volumes:
-      - mongo_data:/data/db
+networks:
+  jdps_network:
+    name: jdps_network
 
 volumes:
   mongo_data:
+
