@@ -151,12 +151,19 @@ jobs:
             done
 
             if [ "$RESOLVED" = "true" ]; then
-              echo "DNS is verified for juniordpsdarbhanga.com. Checking SSL certificates..."
+              echo "DNS is verified for juniordpsdarbhanga.com. Setting up SSL certificates..."
               if ! command -v certbot >/dev/null 2>&1; then
-                apt-get update -qq && apt-get install -y -qq certbot python3-certbot-nginx
+                apt-get update -qq && apt-get install -y -qq certbot
               fi
               if [ ! -d "/etc/letsencrypt/live/juniordpsdarbhanga.com" ]; then
-                certbot --nginx -d juniordpsdarbhanga.com -d www.juniordpsdarbhanga.com --non-interactive --agree-tos --email sandyverma3@gmail.com --redirect || true
+                certbot certonly --webroot -w /var/www/certbot -d juniordpsdarbhanga.com -d www.juniordpsdarbhanga.com --non-interactive --agree-tos --email sandyverma3@gmail.com || true
+              fi
+
+              # If certificate was issued, activate HTTPS in Nginx
+              if [ -f "/etc/letsencrypt/live/juniordpsdarbhanga.com/fullchain.pem" ]; then
+                echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MDsKICAgIGxpc3RlbiBbOjpdOjgwOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1OwoKICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgIHJvb3QgL3Zhci93d3cvY2VydGJvdDsKICAgICAgICB0cnlfZmlsZXMgJHVyaSA9NDA0OwogICAgfQoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHJldHVybiAzMDEgaHR0cHM6Ly8kaG9zdCRyZXF1ZXN0X3VyaTsKICAgIH0KfQoKc2VydmVyIHsKICAgIGxpc3RlbiA0NDMgc3NsIGh0dHAyOwogICAgbGlzdGVuIFs6Ol06NDQzIHNzbCBodHRwMjsKICAgIHNlcnZlcl9uYW1lIGp1bmlvcmRwc2RhcmJoYW5nYS5jb20gd3d3Lmp1bmlvcmRwc2RhcmJoYW5nYS5jb207CgogICAgc3NsX2NlcnRpZmljYXRlIC9ldGMvbGV0c2VuY3J5cHQvbGl2ZS9qdW5pb3JkcHNkYXJiaGFuZ2EuY29tL2Z1bGxjaGFpbi5wZW07CiAgICBzc2xfY2VydGlmaWNhdGVfa2V5IC9ldGMvbGV0c2VuY3J5cHQvbGl2ZS9qdW5pb3JkcHNkYXJiaGFuZ2EuY29tL3ByaXZrZXkucGVtOwogICAgc3NsX3Byb3RvY29scyBUTFN2MS4yIFRMU3YxLjM7CiAgICBzc2xfY2lwaGVycyBISUdIOiFhTlVMTDohTUQ1OwogICAgc3NsX3ByZWZlcl9zZXJ2ZXJfY2lwaGVycyBvbjsKCiAgICBsb2NhdGlvbiAvIHsKICAgICAgICBwcm94eV9wYXNzIGh0dHA6Ly8xMjcuMC4wLjE6MzAwMDsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiAkY29ubmVjdGlvbl91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgICAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKCiAgICAgICAgcHJveHlfY29ubmVjdF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9zZW5kX3RpbWVvdXQgNjBzOwogICAgICAgIHByb3h5X3JlYWRfdGltZW91dCA2MHM7CiAgICAgICAgY2xpZW50X21heF9ib2R5X3NpemUgMjVNOwogICAgfQp9Cg==" | base64 -d > /etc/nginx/sites-available/juniordps
+                nginx -t && (systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true)
+                echo "✓ SSL Certificate successfully installed and Nginx reloaded for HTTPS!"
               fi
             else
               echo "DNS for juniordpsdarbhanga.com has not yet propagated to 5.175.216.125. Skipping Certbot until DNS is pointed."
