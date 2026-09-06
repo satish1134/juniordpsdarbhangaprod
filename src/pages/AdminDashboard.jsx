@@ -13,6 +13,7 @@ import { useToast } from "../hooks/use-toast";
 import ContentEditor from "../components/ContentEditor";
 import TwoFactorPanel from "../components/TwoFactorPanel";
 import AuditLogPanel from "../components/AuditLogPanel";
+import OfficialMailboxPanel from "../components/OfficialMailboxPanel";
 import AdminSessionWarning from "../components/AdminSessionWarning";
 import { useAdminInactivity } from "../hooks/useAdminInactivity";
 import { isSessionExpired, clearAdminSession } from "../lib/sessionManager";
@@ -22,6 +23,7 @@ import { logError } from "../lib/logger";
 import {
   adminMe, adminLogout, listEnquiries, updateEnquiryStatus, deleteEnquiry,
   listAllNews, createNews, updateNews, deleteNews, fetchDbStatus, getAdminPath,
+  fetchOfficialEmails,
 } from "../lib/api";
 
 const statusColors = {
@@ -39,6 +41,7 @@ const AdminDashboard = () => {
   const [filter, setFilter] = useState("all");
   const [editing, setEditing] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
+  const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { content, refresh: refreshPublic } = useContent();
@@ -71,10 +74,18 @@ const AdminDashboard = () => {
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [e, n, db] = await Promise.allSettled([listEnquiries(), listAllNews(), fetchDbStatus()]);
+      const [e, n, db, mails] = await Promise.allSettled([
+        listEnquiries(),
+        listAllNews(),
+        fetchDbStatus(),
+        fetchOfficialEmails(),
+      ]);
       if (e.status === "fulfilled") setEnquiries(e.value.data || []);
       if (n.status === "fulfilled") setNews(n.value.data || []);
       if (db.status === "fulfilled") setDbStatus(db.value.data || null);
+      if (mails.status === "fulfilled" && mails.value.data?.counts) {
+        setMailboxUnreadCount(mails.value.data.counts.total_unread || 0);
+      }
     } catch (err) {
       logError("Failed to refresh admin data:", err);
     }
@@ -237,6 +248,7 @@ const AdminDashboard = () => {
         <div className="flex flex-wrap items-center gap-3 mb-8">
           {[
             { key: "enquiries", label: "Enquiries", icon: Inbox, count: counts.all },
+            { key: "mailbox", label: "Official Mailbox", icon: Mail, count: mailboxUnreadCount },
             { key: "news", label: "News & Notices", icon: Newspaper, count: news.length },
             { key: "content", label: "Site Content", icon: Palette },
             { key: "security", label: "Security", icon: ShieldCheck },
@@ -262,7 +274,12 @@ const AdminDashboard = () => {
           ))}
         </div>
 
-        {loading && tab !== "content" && tab !== "security" && tab !== "audit" && <div className="text-center py-24"><Loader2 className="w-6 h-6 animate-spin inline text-[#0a5f3d]" /></div>}
+        {loading && tab !== "content" && tab !== "security" && tab !== "audit" && tab !== "mailbox" && (
+          <div className="text-center py-24"><Loader2 className="w-6 h-6 animate-spin inline text-[#0a5f3d]" /></div>
+        )}
+
+        {/* Official Mailbox (Tracking info@, account@, principal@) */}
+        {tab === "mailbox" && <OfficialMailboxPanel />}
 
         {/* Site Content */}
         {tab === "content" && (
