@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { programs as fallbackPrograms } from "../mock";
 import { useContent } from "../lib/ContentContext";
 import { ArrowUpRight, Sparkles } from "lucide-react";
+import { resolveImageUrl } from "../lib/api";
 
 const Academics = () => {
   const { content } = useContent();
@@ -61,8 +62,26 @@ const Academics = () => {
               const highlights = Array.isArray(cur.highlights) ? cur.highlights : [];
               return (
                 <div className="grid md:grid-cols-2 gap-8 items-stretch">
-                  <div className="rounded-3xl overflow-hidden aspect-[4/5] zoom-parent shadow-xl">
-                    <img src={cur.image} alt={cur.level || "Academic Program"} className="w-full h-full object-cover" />
+                  <div className="rounded-3xl overflow-hidden aspect-[4/5] shadow-xl bg-gradient-to-br from-[#0a3d29] via-[#084a30] to-[#042417] flex flex-col items-center justify-center p-8 text-center text-[#fff9e6] relative">
+                    {cur.image ? (
+                      <img
+                        src={resolveImageUrl(cur.image)}
+                        alt={cur.level || "Academic Program"}
+                        className="w-full h-full object-cover absolute inset-0"
+                        crossOrigin="anonymous"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-20 h-20 rounded-2xl bg-[#c99f3b]/15 border border-[#c99f3b]/30 flex items-center justify-center mb-4">
+                          <Sparkles className="w-10 h-10 text-[#c99f3b]" />
+                        </div>
+                        <span className="text-xs uppercase tracking-[0.25em] text-[#c99f3b] font-semibold">{cur.grades || "CBSE Curriculum"}</span>
+                        <h4 className="font-display text-2xl font-bold mt-2 text-[#fff9e6]">{cur.level}</h4>
+                        <p className="text-xs text-[#fff9e6]/70 mt-3 max-w-[240px] leading-relaxed">
+                          Holistic curriculum focused on inquiry, values & academic excellence.
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col justify-center">
                     <div className="inline-flex items-center gap-2 self-start px-3 py-1 rounded-full bg-[#c99f3b]/15 text-[#8a6b1e] text-[11px] font-semibold tracking-widest uppercase">

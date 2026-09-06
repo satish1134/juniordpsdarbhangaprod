@@ -332,7 +332,7 @@ const newsList: NewsItem[] = [
     body: "Junior DPS Darbhanga is now accepting applications for the academic session 2025-26. Interested parents can visit our campus between 9 AM and 2 PM on all working days, or fill out the online enquiry form for a callback.",
     tag: "Admissions",
     date: "12 Jul 2025",
-    cover_image: "https://images.unsplash.com/photo-1524069290683-0457abfe42c3?crop=entropy&cs=srgb&fm=jpg&w=1200&q=80",
+    cover_image: "",
     published: true,
     created_at: new Date("2025-07-12T10:00:00Z").toISOString(),
   },
@@ -343,7 +343,7 @@ const newsList: NewsItem[] = [
     body: "We are proud to announce that Aarav, Sneha and Rohan of Class IX have won gold, silver and bronze medals respectively at the CBSE regional science exhibition. Their working model on solar-powered rural irrigation was appreciated by the chief guest.",
     tag: "Achievement",
     date: "28 Jun 2025",
-    cover_image: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    cover_image: "",
     published: true,
     created_at: new Date("2025-06-28T10:00:00Z").toISOString(),
   },
@@ -354,7 +354,7 @@ const newsList: NewsItem[] = [
     body: "Books open doors. Our new Summer Reading Challenge runs from 15 June to 10 August 2025, with grade-wise reading lists, weekly book clubs and a live session with a bestselling children's author.",
     tag: "Event",
     date: "14 Jun 2025",
-    cover_image: "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?crop=entropy&cs=srgb&fm=jpg&w=1200&q=80",
+    cover_image: "",
     published: true,
     created_at: new Date("2025-06-14T10:00:00Z").toISOString(),
   },
@@ -384,15 +384,11 @@ const DEFAULT_CONTENT: Record<string, any> = {
     timings: "08:00 AM – 03:00 PM (Mon – Sat)",
     logo: "",
   },
-  hero_slides: [
-    { image: "https://images.unsplash.com/photo-1729284440498-19b2295ac7bb?crop=entropy&cs=srgb&fm=jpg&w=1920&q=85", title: "Where Curiosity Meets Excellence", subtitle: "A CBSE affiliated institution dedicated to holistic child development in the heart of Darbhanga." },
-    { image: "https://images.unsplash.com/photo-1524069290683-0457abfe42c3?crop=entropy&cs=srgb&fm=jpg&w=1920&q=85", title: "Learning Beyond Textbooks", subtitle: "Modern pedagogy blended with values that stay with our children for a lifetime." },
-    { image: "https://images.unsplash.com/photo-1709290749293-c6152a187b14?crop=entropy&cs=srgb&fm=jpg&w=1920&q=85", title: "Every Child, A Bright Star", subtitle: "Individual attention, small class sizes and mentors who truly care." },
-  ],
+  hero_slides: [],
   principal: {
     name: "Mrs. Neelam Verma",
     title: "Principal, Junior DPS Darbhanga",
-    photo: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+    photo: "",
     message: "At Junior DPS Darbhanga, we believe every child carries a spark of brilliance waiting to be nurtured. Our promise to parents is simple — a safe, joyful and rigorous environment where children learn to think, care and contribute. As we step into a new academic year, we invite you to walk this beautiful journey of growth with us.",
   },
   gallery_intro: {
@@ -412,16 +408,7 @@ const DEFAULT_CONTENT: Record<string, any> = {
     title_accent: "that inspire.",
     description: "Every corner of our campus is built with the child in mind — bright, safe, engaging and fully equipped for exploration.",
   },
-  gallery: [
-    { src: "https://images.unsplash.com/photo-1729284440498-19b2295ac7bb?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Morning Assembly", tag: "Events" },
-    { src: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Young Scientists in Action", tag: "Academics" },
-    { src: "https://images.unsplash.com/photo-1680178776508-41a276595b0f?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Reading Corner", tag: "Library" },
-    { src: "https://images.unsplash.com/photo-1607211851821-8be3cd6146f0?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Little Artists at Work", tag: "Arts" },
-    { src: "https://images.unsplash.com/photo-1595210382266-2d0077c1f541?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Inter-house Cricket Cup", tag: "Sports" },
-    { src: "https://images.unsplash.com/photo-1463592177119-bab2a00f3ccb?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Annual Cultural Fest", tag: "Events" },
-    { src: "https://images.pexels.com/photos/19760978/pexels-photo-19760978.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Safe School Transport", tag: "Campus" },
-    { src: "https://images.pexels.com/photos/10638069/pexels-photo-10638069.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Digital Learning Session", tag: "Tech" },
-  ],
+  gallery: [],
   testimonials: [
     { name: "Priya Sharma", role: "Parent, Class IV", quote: "The teachers at Junior DPS Darbhanga genuinely care. My daughter looks forward to school every single day — that says everything." },
     { name: "Rakesh Kumar", role: "Parent, Class VIII", quote: "The balance between academics, sports and moral values is remarkable. My son has grown into a confident, curious learner." },
@@ -510,7 +497,7 @@ const DEFAULT_CONTENT: Record<string, any> = {
       ageRange: "3 – 5 years",
       desc: "Play-based learning that awakens curiosity, motor skills and confidence in our youngest learners.",
       highlights: ["Activity based learning", "Story & rhyme sessions", "Creative art corners"],
-      image: "https://images.unsplash.com/photo-1607211851821-8be3cd6146f0?crop=entropy&cs=srgb&fm=jpg&w=1200&q=85",
+      image: "",
     },
     {
       level: "Primary",
@@ -518,7 +505,7 @@ const DEFAULT_CONTENT: Record<string, any> = {
       ageRange: "6 – 10 years",
       desc: "Foundational literacy, numeracy and critical thinking supported by a caring mentor system.",
       highlights: ["CBSE aligned curriculum", "Reading & writing labs", "Life skill workshops"],
-      image: "https://images.unsplash.com/photo-1642140027867-e5983a32119c?crop=entropy&cs=srgb&fm=jpg&w=1200&q=85",
+      image: "",
     },
     {
       level: "Middle & Senior",
@@ -526,7 +513,7 @@ const DEFAULT_CONTENT: Record<string, any> = {
       ageRange: "11 – 16 years",
       desc: "Concept-driven learning, science & maths olympiad prep and structured career counselling.",
       highlights: ["Well equipped labs", "Olympiad & competition prep", "Career mentorship"],
-      image: "https://images.pexels.com/photos/17530401/pexels-photo-17530401.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      image: "",
     },
   ],
   facilities_list: [
@@ -577,10 +564,10 @@ const DEFAULT_CONTENT: Record<string, any> = {
     title_accent: "with pride.",
     description: "A few recognitions our students, teachers and school have earned along the way. We celebrate every one — big or small.",
     items: [
-      { title: "Best CBSE School — Darbhanga", year: "2024", awarded_by: "Bihar Education Excellence Awards", description: "Recognised for consistent academic results and holistic student development.", image: "https://images.unsplash.com/photo-1518063319789-7217e6706b04?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80" },
-      { title: "Regional Science Fair — Gold", year: "2024", awarded_by: "CBSE Patna Region", description: "Class IX students bagged gold for a working model on solar-powered rural irrigation.", image: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940" },
-      { title: "Green School Certification", year: "2023", awarded_by: "Centre for Science and Environment", description: "Awarded for water-conservation, waste-segregation and campus greening practices.", image: "https://images.unsplash.com/photo-1509062522246-3755977927d7?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80" },
-      { title: "Inter-school Cricket Champions", year: "2023", awarded_by: "Darbhanga Zonal Cricket Meet", description: "Under-14 boys team lifted the winners' trophy for the second year running.", image: "https://images.unsplash.com/photo-1595210382266-2d0077c1f541?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80" },
+      { title: "Best CBSE School — Darbhanga", year: "2024", awarded_by: "Bihar Education Excellence Awards", description: "Recognised for consistent academic results and holistic student development.", image: "" },
+      { title: "Regional Science Fair — Gold", year: "2024", awarded_by: "CBSE Patna Region", description: "Class IX students bagged gold for a working model on solar-powered rural irrigation.", image: "" },
+      { title: "Green School Certification", year: "2023", awarded_by: "Centre for Science and Environment", description: "Awarded for water-conservation, waste-segregation and campus greening practices.", image: "" },
+      { title: "Inter-school Cricket Champions", year: "2023", awarded_by: "Darbhanga Zonal Cricket Meet", description: "Under-14 boys team lifted the winners' trophy for the second year running.", image: "" },
     ],
   },
   transport_policies: {
@@ -1062,7 +1049,7 @@ apiRouter.get("/db-status", async (req, res) => {
 });
 
 // Admin Login
-apiRouter.post("/admin/login", async (req, res) => {
+const handleAdminLogin = async (req: any, res: any) => {
   try {
     const { username, password, otp, emailOtp } = req.body || {};
     const user = (username || "").trim();
@@ -1179,7 +1166,14 @@ apiRouter.post("/admin/login", async (req, res) => {
     console.error("[Login Error]:", err);
     return res.status(500).json({ detail: err?.message || "Login authentication error" });
   }
-});
+};
+
+apiRouter.post("/admin/login", handleAdminLogin);
+apiRouter.post("/auth/login", handleAdminLogin);
+apiRouter.post("/login", handleAdminLogin);
+app.post("/api/admin/login", handleAdminLogin);
+app.post("/api/auth/login", handleAdminLogin);
+app.post("/api/login", handleAdminLogin);
 
 // Verify & Activate Compulsory 2FA Setup
 apiRouter.post("/admin/2fa/verify-setup", async (req, res) => {
@@ -2508,7 +2502,29 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
     });
   });
 
+  async function warmupContent() {
+    try {
+      const db = await getDb();
+      if (db) {
+        const docs = await db.collection("content").find({}).toArray();
+        for (const doc of docs) {
+          if (doc.section && doc.data !== undefined) {
+            contentStore.set(doc.section, doc.data);
+          } else if (doc._id && typeof doc._id === "string" && (doc.data !== undefined || doc.value !== undefined)) {
+            contentStore.set(doc._id, doc.data !== undefined ? doc.data : doc.value);
+          } else if (doc.key && (doc.value !== undefined || doc.data !== undefined)) {
+            contentStore.set(doc.key, doc.data !== undefined ? doc.data : doc.value);
+          }
+        }
+        console.log(`[Content] Pre-warmed ${docs.length} sections from MongoDB into memory cache`);
+      }
+    } catch (err: any) {
+      console.warn("[Content] Warmup note:", err?.message || err);
+    }
+  }
+
   async function start() {
+    warmupContent().catch(() => {});
     if (process.env.NODE_ENV !== "production") {
       try {
         const { createServer: createViteServer } = await import("vite");

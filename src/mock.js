@@ -34,23 +34,7 @@ export const navLinks = [
   { label: "Contact", href: "/#contact", route: "/", hash: "#contact" },
 ];
 
-export const heroSlides = [
-  {
-    image: "https://images.unsplash.com/photo-1729284440498-19b2295ac7bb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwxfHxzdHVkZW50cyUyMHVuaWZvcm18ZW58MHx8fHwxNzg1NDcwMTM5fDA&ixlib=rb-4.1.0&q=85&w=1920",
-    title: "Where Curiosity Meets Excellence",
-    subtitle: "A CBSE affiliated institution dedicated to holistic child development in the heart of Darbhanga.",
-  },
-  {
-    image: "https://images.unsplash.com/photo-1524069290683-0457abfe42c3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwxfHxJbmRpYW4lMjBzY2hvb2x8ZW58MHx8fHwxNzg0NjEwNzEyfDA&ixlib=rb-4.1.0&q=85&w=1920",
-    title: "Learning Beyond Textbooks",
-    subtitle: "Modern pedagogy blended with values that stay with our children for a lifetime.",
-  },
-  {
-    image: "https://images.unsplash.com/photo-1709290749293-c6152a187b14?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwyfHxJbmRpYW4lMjBzY2hvb2x8ZW58MHx8fHwxNzg0NjEwNzEzfDA&ixlib=rb-4.1.0&q=85&w=1920",
-    title: "Every Child, A Bright Star",
-    subtitle: "Individual attention, small class sizes and mentors who truly care.",
-  },
-];
+export const heroSlides = [];
 
 export const aboutHighlights = [
   { title: "Value-Driven Education", desc: "We blend academic rigour with Indian values, integrity and empathy to raise thoughtful citizens." },
@@ -66,7 +50,7 @@ export const programs = [
     ageRange: "3 – 5 years",
     desc: "Play-based learning that awakens curiosity, motor skills and confidence in our youngest learners.",
     highlights: ["Activity based learning", "Story & rhyme sessions", "Creative art corners"],
-    image: "https://images.unsplash.com/photo-1607211851821-8be3cd6146f0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2ODl8MHwxfHNlYXJjaHw0fHxraWRzJTIwYXJ0fGVufDB8fHx8MTc4NTQ3MDE1M3ww&ixlib=rb-4.1.0&q=85&w=1200",
+    image: "",
   },
   {
     level: "Primary",
@@ -74,7 +58,7 @@ export const programs = [
     ageRange: "6 – 10 years",
     desc: "Foundational literacy, numeracy and critical thinking supported by a caring mentor system.",
     highlights: ["CBSE aligned curriculum", "Reading & writing labs", "Life skill workshops"],
-    image: "https://images.unsplash.com/photo-1642140027867-e5983a32119c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHw0fHxzdHVkZW50cyUyMHVuaWZvcm18ZW58MHx8fHwxNzg1NDcwMTM5fDA&ixlib=rb-4.1.0&q=85&w=1200",
+    image: "",
   },
   {
     level: "Middle & Senior",
@@ -82,7 +66,7 @@ export const programs = [
     ageRange: "11 – 16 years",
     desc: "Concept-driven learning, science & maths olympiad prep and structured career counselling.",
     highlights: ["Well equipped labs", "Olympiad & competition prep", "Career mentorship"],
-    image: "https://images.pexels.com/photos/17530401/pexels-photo-17530401.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    image: "",
   },
 ];
 
@@ -98,16 +82,7 @@ export const facilities = [
   { name: "Cafeteria", icon: "Utensils", desc: "Hygienic, nutritious meals prepared under expert supervision." },
 ];
 
-export const galleryImages = [
-  { src: "https://images.unsplash.com/photo-1729284440498-19b2295ac7bb?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Morning Assembly", tag: "Events" },
-  { src: "https://images.pexels.com/photos/18471527/pexels-photo-18471527.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Young Scientists in Action", tag: "Academics" },
-  { src: "https://images.unsplash.com/photo-1680178776508-41a276595b0f?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Reading Corner", tag: "Library" },
-  { src: "https://images.unsplash.com/photo-1607211851821-8be3cd6146f0?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Little Artists at Work", tag: "Arts" },
-  { src: "https://images.unsplash.com/photo-1595210382266-2d0077c1f541?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Inter-house Cricket Cup", tag: "Sports" },
-  { src: "https://images.unsplash.com/photo-1463592177119-bab2a00f3ccb?crop=entropy&cs=srgb&fm=jpg&w=1000&q=85", caption: "Annual Cultural Fest", tag: "Events" },
-  { src: "https://images.pexels.com/photos/19760978/pexels-photo-19760978.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Safe School Transport", tag: "Campus" },
-  { src: "https://images.pexels.com/photos/10638069/pexels-photo-10638069.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940", caption: "Digital Learning Session", tag: "Tech" },
-];
+export const galleryImages = [];
 
 export const testimonials = [
   { name: "Priya Sharma", role: "Parent, Class IV", quote: "The teachers at Junior DPS Darbhanga genuinely care. My daughter looks forward to school every single day — that says everything." },
@@ -118,7 +93,7 @@ export const testimonials = [
 export const principalMessage = {
   name: "Mrs. Neelam Verma",
   title: "Principal, Junior DPS Darbhanga",
-  photo: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?crop=entropy&cs=srgb&fm=jpg&w=800&q=80",
+  photo: "",
   message:
     "At Junior DPS Darbhanga, we believe every child carries a spark of brilliance waiting to be nurtured. Our promise to parents is simple — a safe, joyful and rigorous environment where children learn to think, care and contribute. As we step into a new academic year, we invite you to walk this beautiful journey of growth with us.",
 };

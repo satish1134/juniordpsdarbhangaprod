@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { ArrowRight, Play, Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowRight, Play, Sparkles, ChevronLeft, ChevronRight, GraduationCap } from "lucide-react";
 import { useContent } from "../lib/ContentContext";
 import { HERO_MIN_VH, pick } from "../lib/displaySizes";
 import { resolveImageUrl } from "../lib/api";
 import { Button } from "./ui/button";
-import { stats as fallbackStats, heroSlides as fallbackSlides } from "../mock";
+import { stats as fallbackStats } from "../mock";
 
 const Hero = ({ onEnquiry }) => {
   const { content } = useContent();
-  const heroSlides = Array.isArray(content?.hero_slides) && content.hero_slides.length ? content.hero_slides : fallbackSlides;
+  const heroSlides = Array.isArray(content?.hero_slides) && content.hero_slides.length ? content.hero_slides : [];
   const schoolInfo = content?.school_info || {};
   const display = content?.display || {};
   const heroVh = pick(HERO_MIN_VH, display.hero_height);
@@ -24,7 +24,7 @@ const Hero = ({ onEnquiry }) => {
     return () => clearInterval(t);
   }, [heroSlides.length]);
 
-  const slide = heroSlides[idx] || { image: "", title: "", subtitle: "" };
+  const slide = heroSlides[idx] || null;
 
   return (
     <section id="home" className="relative overflow-hidden bg-[#fbfaf6]" style={{ minHeight: `${heroVh}vh` }}>
@@ -91,41 +91,62 @@ const Hero = ({ onEnquiry }) => {
             <div className="absolute -inset-3 rounded-[38px] border border-[#0a5f3d]/15" />
             <div className="absolute -inset-6 rounded-[42px] border border-[#c99f3b]/25" />
 
-            <div className="relative rounded-[32px] overflow-hidden shadow-2xl shadow-[#0a3d29]/30 aspect-[4/5] zoom-parent bg-[#0a3d29]">
-              {heroSlides.map((s, i) => (
-                <img
-                  key={s._id || i}
-                  src={resolveImageUrl(s.image)}
-                  alt={s.title || "Hero banner"}
-                  className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
-                    i === idx ? "opacity-100" : "opacity-0"
-                  }`}
-                  crossOrigin="anonymous"
-                />
-              ))}
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0a3d29]/70 via-transparent to-transparent" />
+            <div className="relative rounded-[32px] overflow-hidden shadow-2xl shadow-[#0a3d29]/30 aspect-[4/5] zoom-parent bg-gradient-to-br from-[#0a3d29] via-[#084a30] to-[#042417]">
+              {heroSlides.length > 0 ? (
+                <>
+                  {heroSlides.map((s, i) => (
+                    s.image ? (
+                      <img
+                        key={s._id || i}
+                        src={resolveImageUrl(s.image)}
+                        alt={s.title || "Hero banner"}
+                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
+                          i === idx ? "opacity-100" : "opacity-0"
+                        }`}
+                        crossOrigin="anonymous"
+                      />
+                    ) : null
+                  ))}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0a3d29]/80 via-transparent to-transparent" />
 
-              {/* Slide caption */}
-              <div className="absolute bottom-6 left-6 right-6 text-[#fff9e6]">
-                <div className="text-[11px] tracking-[0.3em] uppercase opacity-80">Life at Junior DPS</div>
-                <div className="font-display text-xl md:text-2xl font-semibold mt-1">{slide.title}</div>
-              </div>
+                  {/* Slide caption */}
+                  {slide && (
+                    <div className="absolute bottom-6 left-6 right-6 text-[#fff9e6]">
+                      <div className="text-[11px] tracking-[0.3em] uppercase opacity-80">Life at Junior DPS</div>
+                      <div className="font-display text-xl md:text-2xl font-semibold mt-1">{slide.title}</div>
+                    </div>
+                  )}
 
-              {/* Slide controls */}
-              <div className="absolute top-5 right-5 flex gap-2">
-                <button
-                  onClick={() => setIdx((i) => (i - 1 + heroSlides.length) % heroSlides.length)}
-                  className="w-9 h-9 rounded-full bg-[#fbfaf6]/25 backdrop-blur border border-white/30 text-white flex items-center justify-center hover:bg-[#fbfaf6]/50 transition"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setIdx((i) => (i + 1) % heroSlides.length)}
-                  className="w-9 h-9 rounded-full bg-[#fbfaf6]/25 backdrop-blur border border-white/30 text-white flex items-center justify-center hover:bg-[#fbfaf6]/50 transition"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+                  {/* Slide controls */}
+                  {heroSlides.length > 1 && (
+                    <div className="absolute top-5 right-5 flex gap-2">
+                      <button
+                        onClick={() => setIdx((i) => (i - 1 + heroSlides.length) % heroSlides.length)}
+                        className="w-9 h-9 rounded-full bg-[#fbfaf6]/25 backdrop-blur border border-white/30 text-white flex items-center justify-center hover:bg-[#fbfaf6]/50 transition"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setIdx((i) => (i + 1) % heroSlides.length)}
+                        className="w-9 h-9 rounded-full bg-[#fbfaf6]/25 backdrop-blur border border-white/30 text-white flex items-center justify-center hover:bg-[#fbfaf6]/50 transition"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center text-[#fff9e6] relative">
+                  <div className="w-24 h-24 rounded-full border-2 border-[#c99f3b]/40 bg-[#c99f3b]/10 flex items-center justify-center mb-5 shadow-inner">
+                    <GraduationCap className="w-12 h-12 text-[#c99f3b]" />
+                  </div>
+                  <div className="text-xs uppercase tracking-[0.3em] text-[#c99f3b] font-semibold">Junior Delhi Public School</div>
+                  <div className="font-display text-2xl font-bold mt-2 text-[#fff9e6]">Darbhanga</div>
+                  <div className="text-xs text-[#fff9e6]/75 mt-3 max-w-xs leading-relaxed">
+                    Nurturing Minds, Shaping Futures • CBSE Affiliation
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Floating stat card */}

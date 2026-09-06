@@ -2,16 +2,18 @@ import React, { useState, useMemo } from "react";
 import { useContent } from "../lib/ContentContext";
 import { GALLERY_ROW_PX, pick } from "../lib/displaySizes";
 import { resolveImageUrl } from "../lib/api";
-import { galleryImages as fallbackGallery } from "../mock";
 import { Dialog, DialogContent } from "./ui/dialog";
-import { Image as ImageIcon, X } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 
 const Gallery = () => {
   const { content } = useContent();
-  const galleryImages = useMemo(() => (Array.isArray(content?.gallery) && content.gallery.length ? content.gallery : fallbackGallery), [content?.gallery]);
+  const galleryImages = useMemo(() => (Array.isArray(content?.gallery) && content.gallery.length ? content.gallery : []), [content?.gallery]);
   const display = content?.display || {};
   const rowHeight = pick(GALLERY_ROW_PX, display.gallery_size);
-  const tags = useMemo(() => ["All", ...Array.from(new Set(galleryImages.map((g) => g?.tag || "General")))], [galleryImages]);
+  const tags = useMemo(() => {
+    if (!galleryImages.length) return ["All"];
+    return ["All", ...Array.from(new Set(galleryImages.map((g) => g?.tag || "General")))];
+  }, [galleryImages]);
   const intro = content.gallery_intro || {};
   const [filter, setFilter] = useState("All");
   const [open, setOpen] = useState(false);
@@ -49,47 +51,57 @@ const Gallery = () => {
           </div>
         </div>
 
-        <div
-          className="mt-12 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
-          style={{ gridAutoRows: `${rowHeight}px` }}
-        >
-          {filtered.map((g, i) => {
-            const spans = ["md:row-span-2", "", "", "md:col-span-2", "", "", "md:row-span-2", ""];
-            const imgSrc = resolveImageUrl(g.src);
-            return (
-              <button
-                key={g._id || i}
-                onClick={() => { setCurrent(g); setOpen(true); }}
-                className={`group relative rounded-2xl overflow-hidden zoom-parent bg-[#0a3d29]/10 ${spans[i % spans.length]}`}
-              >
-                {imgSrc ? (
-                  <img
-                    src={imgSrc}
-                    alt={g.caption || "School gallery image"}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                    crossOrigin="anonymous"
-                    onError={(e) => {
-                      if (e?.target) {
-                        e.target.style.display = "none";
-                      }
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-[#0a5f3d]/40">
-                    <ImageIcon className="w-8 h-8 mb-2" />
-                    <span className="text-xs">{g.caption || "Image"}</span>
+        {filtered.length === 0 ? (
+          <div className="mt-12 rounded-3xl border border-dashed border-[#0a5f3d]/20 bg-white/60 py-16 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-[#0a5f3d]/10 text-[#0a5f3d] flex items-center justify-center mx-auto mb-3">
+              <ImageIcon className="w-7 h-7" />
+            </div>
+            <p className="text-[#0a3d29] font-medium text-sm">School Moments Gallery</p>
+            <p className="text-xs text-[#1c2a24]/60 mt-1">Images will appear here once loaded from the school portal.</p>
+          </div>
+        ) : (
+          <div
+            className="mt-12 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+            style={{ gridAutoRows: `${rowHeight}px` }}
+          >
+            {filtered.map((g, i) => {
+              const spans = ["md:row-span-2", "", "", "md:col-span-2", "", "", "md:row-span-2", ""];
+              const imgSrc = resolveImageUrl(g.src);
+              return (
+                <button
+                  key={g._id || i}
+                  onClick={() => { setCurrent(g); setOpen(true); }}
+                  className={`group relative rounded-2xl overflow-hidden zoom-parent bg-[#0a3d29]/10 ${spans[i % spans.length]}`}
+                >
+                  {imgSrc ? (
+                    <img
+                      src={imgSrc}
+                      alt={g.caption || "School gallery image"}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        if (e?.target) {
+                          e.target.style.display = "none";
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-[#0a5f3d]/40">
+                      <ImageIcon className="w-8 h-8 mb-2" />
+                      <span className="text-xs">{g.caption || "Image"}</span>
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0a3d29]/85 via-[#0a3d29]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute left-4 bottom-4 right-4 text-left text-[#fff9e6] translate-y-4 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all">
+                    <div className="text-[10px] tracking-[0.3em] uppercase text-[#c99f3b]">{g.tag}</div>
+                    <div className="font-display text-lg font-semibold mt-1">{g.caption}</div>
                   </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0a3d29]/85 via-[#0a3d29]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="absolute left-4 bottom-4 right-4 text-left text-[#fff9e6] translate-y-4 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all">
-                  <div className="text-[10px] tracking-[0.3em] uppercase text-[#c99f3b]">{g.tag}</div>
-                  <div className="font-display text-lg font-semibold mt-1">{g.caption}</div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

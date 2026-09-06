@@ -83,12 +83,22 @@ const About = () => {
         <div className="mt-24 grid lg:grid-cols-12 gap-10 items-center">
           <div className="lg:col-span-5 relative">
             <div className="relative rounded-[32px] overflow-hidden aspect-[4/5] shadow-2xl shadow-[#0a3d29]/20 zoom-parent bg-[#0a3d29]">
-              <img
-                src={resolveImageUrl(principalMessage.photo)}
-                alt={principalMessage.name || "Principal"}
-                className="w-full h-full object-cover"
-                crossOrigin="anonymous"
-              />
+              {principalMessage.photo ? (
+                <img
+                  src={resolveImageUrl(principalMessage.photo)}
+                  alt={principalMessage.name || "Principal"}
+                  className="w-full h-full object-cover"
+                  crossOrigin="anonymous"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-[#0a3d29] via-[#084a30] to-[#042417] flex flex-col items-center justify-center text-center p-6">
+                  <div className="w-24 h-24 rounded-full border-2 border-[#c99f3b]/40 bg-[#c99f3b]/10 flex items-center justify-center mb-4">
+                    <span className="font-display text-3xl font-bold text-[#c99f3b]">JDPS</span>
+                  </div>
+                  <div className="font-display text-xl font-bold text-[#fff9e6]">{principalMessage.name || "Principal's Desk"}</div>
+                  <div className="text-xs text-[#c99f3b] tracking-widest uppercase mt-1">Junior DPS Darbhanga</div>
+                </div>
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-[#0a3d29]/60 via-transparent to-transparent" />
               <div className="absolute bottom-6 left-6 right-6 text-[#fff9e6]">
                 <div className="font-display text-xl font-bold">{principalMessage.name}</div>
