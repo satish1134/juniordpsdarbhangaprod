@@ -17,12 +17,18 @@ const Footer = () => {
     : [{ label: "Fee Structure", href: "/fees" }, { label: "School Calendar", href: "/calendar" }];
   const quickLinks = rawQuickLinks.map((l) => {
     if (l && typeof l.label === "string" && l.label.toLowerCase().includes("parent login")) {
-      return { label: "Webmail Login", href: "https://mail.zoho.com", isWebmail: true };
+      return { label: "Webmail Login", href: "https://www.zoho.com/mail/login.html", isWebmail: true };
+    }
+    if (l && typeof l.label === "string" && l.label.toLowerCase().includes("webmail")) {
+      const fixedHref = (!l.href || l.href === "https://mail.zoho.com" || l.href === "https://mail.zoho.com/")
+        ? "https://www.zoho.com/mail/login.html"
+        : l.href;
+      return { ...l, href: fixedHref, isWebmail: true };
     }
     return l;
   });
   if (!quickLinks.some((l) => l.label && l.label.toLowerCase().includes("webmail"))) {
-    quickLinks.push({ label: "Webmail Login", href: "https://mail.zoho.com", isWebmail: true });
+    quickLinks.push({ label: "Webmail Login", href: "https://www.zoho.com/mail/login.html", isWebmail: true });
   }
   const socialIcons = [
     { key: "facebook", Icon: Facebook },
@@ -126,7 +132,7 @@ const Footer = () => {
                   <li key={i}>
                     {isExternal ? (
                       <a
-                        href={l.href || "https://mail.zoho.com"}
+                        href={l.href || "https://www.zoho.com/mail/login.html"}
                         target="_blank"
                         rel="noreferrer"
                         className={`inline-flex items-center gap-1.5 text-[14.5px] transition ${
@@ -172,15 +178,6 @@ const Footer = () => {
             © {new Date().getFullYear()} Junior DPS Darbhanga. All rights reserved.
           </p>
           <div className="flex flex-wrap items-center gap-5 text-[13px] text-[#fff9e6]/60">
-            <a
-              href="https://mail.zoho.com"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#c99f3b]/15 border border-[#c99f3b]/30 text-[#c99f3b] hover:bg-[#c99f3b] hover:text-[#0a3d29] font-semibold transition"
-              title="Official Zoho Webmail Login for School Staff & Teachers"
-            >
-              <Mail className="w-3.5 h-3.5" /> Webmail Login (Zoho)
-            </a>
             <Link to="/privacy" className="hover:text-[#c99f3b] transition">Privacy Policy</Link>
             <Link to="/terms" className="hover:text-[#c99f3b] transition">Terms of Use</Link>
             <a href="#" className="hover:text-[#c99f3b] transition">Sitemap</a>

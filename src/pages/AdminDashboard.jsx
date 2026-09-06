@@ -234,7 +234,7 @@ const AdminDashboard = () => {
               </div>
             )}
             <a
-              href="https://mail.zoho.com"
+              href="https://www.zoho.com/mail/login.html"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#c99f3b] text-[#0a3d29] font-bold text-[12px] hover:bg-[#dfb552] transition shadow-md"

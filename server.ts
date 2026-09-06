@@ -707,7 +707,7 @@ const DEFAULT_CONTENT: Record<string, any> = {
       { label: "School Calendar", href: "/calendar" },
       { label: "Transport Policies", href: "/transport" },
       { label: "Uniform Guidelines", href: "#" },
-      { label: "Webmail Login", href: "https://mail.zoho.com" },
+      { label: "Webmail Login", href: "https://www.zoho.com/mail/login.html" },
       { label: "Career with us", href: "/careers" },
     ],
   },
@@ -2339,7 +2339,12 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
     if (result.footer && Array.isArray(result.footer.quick_links)) {
       result.footer.quick_links = result.footer.quick_links.map((l: any) => {
         if (l && typeof l.label === "string" && l.label.toLowerCase().includes("parent login")) {
-          return { label: "Webmail Login", href: "https://mail.zoho.com" };
+          return { label: "Webmail Login", href: "https://www.zoho.com/mail/login.html" };
+        }
+        if (l && typeof l.label === "string" && l.label.toLowerCase().includes("webmail")) {
+          if (!l.href || l.href === "https://mail.zoho.com" || l.href === "https://mail.zoho.com/") {
+            return { ...l, href: "https://www.zoho.com/mail/login.html" };
+          }
         }
         return l;
       });

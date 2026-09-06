@@ -308,7 +308,7 @@ export default function OfficialMailboxPanel() {
             </button>
 
             <a
-              href="https://mail.zoho.in"
+              href="https://www.zoho.com/mail/login.html"
               target="_blank"
               rel="noopener noreferrer"
               className="px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-medium rounded-xl text-sm transition-all flex items-center gap-2 backdrop-blur-sm"
