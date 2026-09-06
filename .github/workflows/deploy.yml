@@ -139,10 +139,8 @@ jobs:
 
             mkdir -p /var/www/certbot/.well-known/acme-challenge /etc/nginx/sites-enabled
             chmod -R 777 /var/www/certbot
-            echo "acme-test-ok" > /var/www/certbot/.well-known/acme-challenge/test.txt
             ln -sf /etc/nginx/sites-available/juniordps /etc/nginx/sites-enabled/juniordps
-            [ -f /etc/nginx/sites-enabled/default ] && rm -f /etc/nginx/sites-enabled/default
-            nginx -t && (systemctl restart nginx 2>/dev/null || nginx -s reload 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
+            rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf 2>/dev/null || true
 
             # Auto-provision or renew Let's Encrypt SSL if DNS resolves to 5.175.216.125
             RESOLVED=true
@@ -158,16 +156,23 @@ jobs:
                 apt-get update -qq && apt-get install -y -qq certbot
               fi
               if [ ! -d "/etc/letsencrypt/live/juniordpsdarbhanga.com" ]; then
-                certbot certonly --webroot -w /var/www/certbot -d juniordpsdarbhanga.com -d www.juniordpsdarbhanga.com --non-interactive --agree-tos --email sandyverma3@gmail.com || true
+                echo "Stopping Nginx temporarily for Certbot standalone..."
+                systemctl stop nginx 2>/dev/null || pkill -9 nginx 2>/dev/null || true
+                sleep 2
+                certbot certonly --standalone -d juniordpsdarbhanga.com -d www.juniordpsdarbhanga.com --non-interactive --agree-tos --email sandyverma3@gmail.com || true
               fi
 
               # If certificate was issued, activate HTTPS in Nginx
               if [ -f "/etc/letsencrypt/live/juniordpsdarbhanga.com/fullchain.pem" ]; then
-                echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MDsKICAgIGxpc3RlbiBbOjpdOjgwOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1OwoKICAgIGxvY2F0aW9uIC8ud2VsbC1rbm93bi9hY21lLWNoYWxsZW5nZS8gewogICAgICAgIHJvb3QgL3Zhci93d3cvY2VydGJvdDsKICAgICAgICB0cnlfZmlsZXMgJHVyaSA9NDA0OwogICAgfQoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHJldHVybiAzMDEgaHR0cHM6Ly8kaG9zdCRyZXF1ZXN0X3VyaTsKICAgIH0KfQoKc2VydmVyIHsKICAgIGxpc3RlbiA0NDMgc3NsIGh0dHAyOwogICAgbGlzdGVuIFs6Ol06NDQzIHNzbCBodHRwMjsKICAgIHNlcnZlcl9uYW1lIGp1bmlvcmRwc2RhcmJoYW5nYS5jb20gd3d3Lmp1bmlvcmRwc2RhcmJoYW5nYS5jb207CgogICAgc3NsX2NlcnRpZmljYXRlIC9ldGMvbGV0c2VuY3J5cHQvbGl2ZS9qdW5pb3JkcHNkYXJiaGFuZ2EuY29tL2Z1bGxjaGFpbi5wZW07CiAgICBzc2xfY2VydGlmaWNhdGVfa2V5IC9ldGMvbGV0c2VuY3J5cHQvbGl2ZS9qdW5pb3JkcHNkYXJiaGFuZ2EuY29tL3ByaXZrZXkucGVtOwogICAgc3NsX3Byb3RvY29scyBUTFN2MS4yIFRMU3YxLjM7CiAgICBzc2xfY2lwaGVycyBISUdIOiFhTlVMTDohTUQ1OwogICAgc3NsX3ByZWZlcl9zZXJ2ZXJfY2lwaGVycyBvbjsKCiAgICBsb2NhdGlvbiAvIHsKICAgICAgICBwcm94eV9wYXNzIGh0dHA6Ly8xMjcuMC4wLjE6MzAwMDsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiAkY29ubmVjdGlvbl91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgICAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKCiAgICAgICAgcHJveHlfY29ubmVjdF90aW1lb3V0IDYwczsKICAgICAgICBwcm94eV9zZW5kX3RpbWVvdXQgNjBzOwogICAgICAgIHByb3h5X3JlYWRfdGltZW91dCA2MHM7CiAgICAgICAgY2xpZW50X21heF9ib2R5X3NpemUgMjVNOwogICAgfQp9Cg==" | base64 -d > /etc/nginx/sites-available/juniordps
-                nginx -t && (systemctl restart nginx 2>/dev/null || nginx -s reload 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
+                echo "bWFwICRodHRwX3VwZ3JhZGUgJGNvbm5lY3Rpb25fdXBncmFkZSB7CiAgICBkZWZhdWx0IHVwZ3JhZGU7CiAgICAnJyBjbG9zZTsKfQoKc2VydmVyIHsKICAgIGxpc3RlbiA4MCBkZWZhdWx0X3NlcnZlcjsKICAgIGxpc3RlbiBbOjpdOjgwIGRlZmF1bHRfc2VydmVyOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbSA1LjE3NS4yMTYuMTI1IF87CgogICAgbG9jYXRpb24gLy53ZWxsLWtub3duL2FjbWUtY2hhbGxlbmdlLyB7CiAgICAgICAgcm9vdCAvdmFyL3d3dy9jZXJ0Ym90OwogICAgICAgIHRyeV9maWxlcyAkdXJpID00MDQ7CiAgICB9CgogICAgbG9jYXRpb24gLyB7CiAgICAgICAgcmV0dXJuIDMwMSBodHRwczovLyRob3N0JHJlcXVlc3RfdXJpOwogICAgfQp9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDQ0MyBzc2wgaHR0cDIgZGVmYXVsdF9zZXJ2ZXI7CiAgICBsaXN0ZW4gWzo6XTo0NDMgc3NsIGh0dHAyIGRlZmF1bHRfc2VydmVyOwogICAgc2VydmVyX25hbWUganVuaW9yZHBzZGFyYmhhbmdhLmNvbSB3d3cuanVuaW9yZHBzZGFyYmhhbmdhLmNvbTsKCiAgICBzc2xfY2VydGlmaWNhdGUgL2V0Yy9sZXRzZW5jcnlwdC9saXZlL2p1bmlvcmRwc2RhcmJoYW5nYS5jb20vZnVsbGNoYWluLnBlbTsKICAgIHNzbF9jZXJ0aWZpY2F0ZV9rZXkgL2V0Yy9sZXRzZW5jcnlwdC9saXZlL2p1bmlvcmRwc2RhcmJoYW5nYS5jb20vcHJpdmtleS5wZW07CiAgICBzc2xfcHJvdG9jb2xzIFRMU3YxLjIgVExTdjEuMzsKICAgIHNzbF9jaXBoZXJzIEhJR0g6IWFOVUxMOiFNRDU7CiAgICBzc2xfcHJlZmVyX3NlcnZlcl9jaXBoZXJzIG9uOwoKICAgIGxvY2F0aW9uIC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAwOwogICAgICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uICRjb25uZWN0aW9uX3VwZ3JhZGU7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvIGh0dHBzOwogICAgICAgIHByb3h5X2NhY2hlX2J5cGFzcyAkaHR0cF91cGdyYWRlOwoKICAgICAgICBwcm94eV9jb25uZWN0X3RpbWVvdXQgNjBzOwogICAgICAgIHByb3h5X3NlbmRfdGltZW91dCA2MHM7CiAgICAgICAgcHJveHlfcmVhZF90aW1lb3V0IDYwczsKICAgICAgICBjbGllbnRfbWF4X2JvZHlfc2l6ZSAyNU07CiAgICB9Cn0K" | base64 -d > /etc/nginx/sites-available/juniordps
+                nginx -t && (systemctl restart nginx 2>/dev/null || systemctl start nginx 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
                 echo "✓ SSL Certificate successfully installed and Nginx reloaded for HTTPS!"
+              else
+                # Fallback start if cert failed
+                nginx -t && (systemctl restart nginx 2>/dev/null || systemctl start nginx 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
               fi
             else
               echo "DNS for juniordpsdarbhanga.com has not yet propagated to 5.175.216.125. Skipping Certbot until DNS is pointed."
+              nginx -t && (systemctl restart nginx 2>/dev/null || systemctl start nginx 2>/dev/null || (pkill -9 nginx 2>/dev/null; nginx))
             fi
 
