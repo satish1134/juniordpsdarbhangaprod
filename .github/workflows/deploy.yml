@@ -128,31 +128,7 @@ jobs:
             sysctl -w net.ipv4.conf.default.route_localnet=1 2>/dev/null || true
 
             # Write authoritative docker-compose.prod.yml to ensure correct image and port binding
-            cat <<'EOF_COMPOSE' > docker-compose.prod.yml
-version: '3.8'
-
-services:
-  app:
-    image: ghcr.io/satish1134/juniordpsdarbhangaprod:latest
-    container_name: juniordps_app
-    restart: always
-    env_file:
-      - .env
-    ports:
-      - "3000:3000"
-    depends_on:
-      - mongodb
-
-  mongodb:
-    image: mongo:6.0
-    container_name: juniordps_mongodb
-    restart: always
-    volumes:
-      - mongo_data:/data/db
-
-volumes:
-  mongo_data:
-EOF_COMPOSE
+            echo "dmVyc2lvbjogJzMuOCcKCnNlcnZpY2VzOgogIGFwcDoKICAgIGltYWdlOiBnaGNyLmlvL3NhdGlzaDExMzQvanVuaW9yZHBzZGFyYmhhbmdhcHJvZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBqdW5pb3JkcHNfYXBwCiAgICByZXN0YXJ0OiBhbHdheXMKICAgIGVudl9maWxlOgogICAgICAtIC5lbnYKICAgIHBvcnRzOgogICAgICAtICIzMDAwOjMwMDAiCiAgICBkZXBlbmRzX29uOgogICAgICAtIG1vbmdvZGIKICAgIGhlYWx0aGNoZWNrOgogICAgICB0ZXN0OiBbIkNNRC1TSEVMTCIsICJ3Z2V0IC1xTy0gaHR0cDovLzEyNy4wLjAuMTozMDAwL2FwaS9oZWFsdGggfHwgY3VybCAtZiBodHRwOi8vMTI3LjAuMC4xOjMwMDAvYXBpL2hlYWx0aCB8fCBleGl0IDEiXQogICAgICBpbnRlcnZhbDogMTVzCiAgICAgIHRpbWVvdXQ6IDVzCiAgICAgIHJldHJpZXM6IDMKCiAgbW9uZ29kYjoKICAgIGltYWdlOiBtb25nbzo2LjAKICAgIGNvbnRhaW5lcl9uYW1lOiBqdW5pb3JkcHNfbW9uZ29kYgogICAgcmVzdGFydDogYWx3YXlzCiAgICB2b2x1bWVzOgogICAgICAtIG1vbmdvX2RhdGE6L2RhdGEvZGIKCnZvbHVtZXM6CiAgbW9uZ29fZGF0YToK" | base64 -d > docker-compose.prod.yml
 
             echo "=== PULLING LATEST DOCKER IMAGE FROM GHCR ==="
             docker pull ghcr.io/satish1134/juniordpsdarbhangaprod:latest
