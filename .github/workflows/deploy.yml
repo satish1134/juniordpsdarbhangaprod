@@ -64,12 +64,20 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           ADMIN_PATH: ${{ secrets.ADMIN_PATH }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ZOHO_SMTP_HOST: ${{ secrets.ZOHO_SMTP_HOST }}
+          ZOHO_SMTP_PORT: ${{ secrets.ZOHO_SMTP_PORT }}
+          ZOHO_SMTP_USER: ${{ secrets.ZOHO_SMTP_USER }}
+          ZOHO_SMTP_PASS: ${{ secrets.ZOHO_SMTP_PASS }}
+          ZOHO_SMTP_PASS_PRINCIPAL: ${{ secrets.ZOHO_SMTP_PASS_PRINCIPAL }}
+          ZOHO_SMTP_PASS_INFO: ${{ secrets.ZOHO_SMTP_PASS_INFO }}
+          ZOHO_SMTP_PASS_ACCOUNT: ${{ secrets.ZOHO_SMTP_PASS_ACCOUNT }}
+          INBOUND_WEBHOOK_SECRET: ${{ secrets.INBOUND_WEBHOOK_SECRET }}
         with:
           host: 5.175.216.125
           port: 22125
           username: root
           password: ${{ secrets.VPS_PASSWORD }}
-          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI,RESEND_API_KEY,SENDER_EMAIL,ADMIN_PATH,ADMIN_EMAIL
+          envs: ADMIN_USERNAME,ADMIN_PASSWORD,JWT_SECRET,MONGO_URI,RESEND_API_KEY,SENDER_EMAIL,ADMIN_PATH,ADMIN_EMAIL,ZOHO_SMTP_HOST,ZOHO_SMTP_PORT,ZOHO_SMTP_USER,ZOHO_SMTP_PASS,ZOHO_SMTP_PASS_PRINCIPAL,ZOHO_SMTP_PASS_INFO,ZOHO_SMTP_PASS_ACCOUNT,INBOUND_WEBHOOK_SECRET
           script: |
             cd /opt/juniordps
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -121,6 +129,43 @@ jobs:
 
             if [ -n "$ADMIN_EMAIL" ]; then
               grep -q "^ADMIN_EMAIL=" .env && sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ADMIN_EMAIL|" .env || echo "ADMIN_EMAIL=$ADMIN_EMAIL" >> .env
+            fi
+
+            # Zoho SMTP Credentials
+            if [ -n "$ZOHO_SMTP_HOST" ]; then
+              grep -q "^ZOHO_SMTP_HOST=" .env && sed -i "s|^ZOHO_SMTP_HOST=.*|ZOHO_SMTP_HOST=$ZOHO_SMTP_HOST|" .env || echo "ZOHO_SMTP_HOST=$ZOHO_SMTP_HOST" >> .env
+            else
+              grep -q "^ZOHO_SMTP_HOST=" .env || echo "ZOHO_SMTP_HOST=smtp.zoho.com" >> .env
+            fi
+
+            if [ -n "$ZOHO_SMTP_PORT" ]; then
+              grep -q "^ZOHO_SMTP_PORT=" .env && sed -i "s|^ZOHO_SMTP_PORT=.*|ZOHO_SMTP_PORT=$ZOHO_SMTP_PORT|" .env || echo "ZOHO_SMTP_PORT=$ZOHO_SMTP_PORT" >> .env
+            else
+              grep -q "^ZOHO_SMTP_PORT=" .env || echo "ZOHO_SMTP_PORT=587" >> .env
+            fi
+
+            if [ -n "$ZOHO_SMTP_USER" ]; then
+              grep -q "^ZOHO_SMTP_USER=" .env && sed -i "s|^ZOHO_SMTP_USER=.*|ZOHO_SMTP_USER=$ZOHO_SMTP_USER|" .env || echo "ZOHO_SMTP_USER=$ZOHO_SMTP_USER" >> .env
+            fi
+
+            if [ -n "$ZOHO_SMTP_PASS" ]; then
+              grep -q "^ZOHO_SMTP_PASS=" .env && sed -i "s|^ZOHO_SMTP_PASS=.*|ZOHO_SMTP_PASS=$ZOHO_SMTP_PASS|" .env || echo "ZOHO_SMTP_PASS=$ZOHO_SMTP_PASS" >> .env
+            fi
+
+            if [ -n "$ZOHO_SMTP_PASS_PRINCIPAL" ]; then
+              grep -q "^ZOHO_SMTP_PASS_PRINCIPAL=" .env && sed -i "s|^ZOHO_SMTP_PASS_PRINCIPAL=.*|ZOHO_SMTP_PASS_PRINCIPAL=$ZOHO_SMTP_PASS_PRINCIPAL|" .env || echo "ZOHO_SMTP_PASS_PRINCIPAL=$ZOHO_SMTP_PASS_PRINCIPAL" >> .env
+            fi
+
+            if [ -n "$ZOHO_SMTP_PASS_INFO" ]; then
+              grep -q "^ZOHO_SMTP_PASS_INFO=" .env && sed -i "s|^ZOHO_SMTP_PASS_INFO=.*|ZOHO_SMTP_PASS_INFO=$ZOHO_SMTP_PASS_INFO|" .env || echo "ZOHO_SMTP_PASS_INFO=$ZOHO_SMTP_PASS_INFO" >> .env
+            fi
+
+            if [ -n "$ZOHO_SMTP_PASS_ACCOUNT" ]; then
+              grep -q "^ZOHO_SMTP_PASS_ACCOUNT=" .env && sed -i "s|^ZOHO_SMTP_PASS_ACCOUNT=.*|ZOHO_SMTP_PASS_ACCOUNT=$ZOHO_SMTP_PASS_ACCOUNT|" .env || echo "ZOHO_SMTP_PASS_ACCOUNT=$ZOHO_SMTP_PASS_ACCOUNT" >> .env
+            fi
+
+            if [ -n "$INBOUND_WEBHOOK_SECRET" ]; then
+              grep -q "^INBOUND_WEBHOOK_SECRET=" .env && sed -i "s|^INBOUND_WEBHOOK_SECRET=.*|INBOUND_WEBHOOK_SECRET=$INBOUND_WEBHOOK_SECRET|" .env || echo "INBOUND_WEBHOOK_SECRET=$INBOUND_WEBHOOK_SECRET" >> .env
             fi
 
             # Enable route_localnet so host localhost traffic cleanly routes to docker-proxy
