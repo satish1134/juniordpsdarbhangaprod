@@ -234,12 +234,32 @@ export interface MailboxMessage {
 // Live real in-memory cache (starts clean with zero fake emails)
 const liveMailboxMessages: MailboxMessage[] = [];
 
-function getMailTransporter() {
-  const user = (process.env.ZOHO_SMTP_USER || "").trim();
-  const pass = (process.env.ZOHO_SMTP_PASS || "").trim();
+function getMailTransporter(mailbox: "principal" | "info" | "account" = "principal") {
   const host = (process.env.ZOHO_SMTP_HOST || "smtp.zoho.com").trim();
   const port = parseInt(process.env.ZOHO_SMTP_PORT || "587", 10);
+
+  let user = "";
+  let pass = "";
+
+  if (mailbox === "info") {
+    user = (process.env.ZOHO_SMTP_USER_INFO || "info@juniordpsdarbhanga.com").trim();
+    pass = (process.env.ZOHO_SMTP_PASS_INFO || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+  } else if (mailbox === "account") {
+    user = (process.env.ZOHO_SMTP_USER_ACCOUNT || "account@juniordpsdarbhanga.com").trim();
+    pass = (process.env.ZOHO_SMTP_PASS_ACCOUNT || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+  } else {
+    user = (process.env.ZOHO_SMTP_USER_PRINCIPAL || process.env.ZOHO_SMTP_USER || "principal@juniordpsdarbhanga.com").trim();
+    pass = (process.env.ZOHO_SMTP_PASS_PRINCIPAL || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+  }
+
+  // Generic fallback if mailbox-specific pass not found
+  if (!pass) {
+    pass = (process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+    user = (process.env.ZOHO_SMTP_USER || `${mailbox}@juniordpsdarbhanga.com`).trim();
+  }
+
   if (!user || !pass) return null;
+
   return nodemailer.createTransport({
     host,
     port,
@@ -1981,7 +2001,7 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
     let dispatchMethod = "unconfigured";
 
     // 1. Try Zoho SMTP via nodemailer if credentials provided in env
-    const transporter = getMailTransporter();
+    const transporter = getMailTransporter(validMailbox as any);
     if (transporter) {
       try {
         dispatchResult = await transporter.sendMail({
