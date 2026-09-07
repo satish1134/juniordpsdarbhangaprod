@@ -80,7 +80,7 @@ export function getSyncStatus() {
   };
 }
 
-function getZohoPassword(key: "principal" | "info" | "account"): string | null {
+export function getZohoPassword(key: "principal" | "info" | "account"): string | null {
   let pass: string | undefined;
   if (key === "principal") {
     pass =

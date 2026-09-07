@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, Component } from "react";
 import "./App.css";
-import { BrowserRouter, Routes, Route, useLocation, useNavigate, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate, Outlet, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import { Toaster } from "./components/ui/toaster";
@@ -69,8 +69,25 @@ const PublicLayout = () => {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  const triggerEnquiryFocus = useCallback(() => {
+    const form = document.getElementById("enquiry-form") || document.getElementById("contact");
+    if (form) {
+      form.scrollIntoView({ behavior: "smooth", block: "center" });
+      form.classList.add("ring-4", "ring-[#c99f3b]", "transition-all", "duration-500");
+      setTimeout(() => {
+        form.classList.remove("ring-4", "ring-[#c99f3b]");
+      }, 2500);
+      const firstInput = form.querySelector("input");
+      if (firstInput) {
+        setTimeout(() => firstInput.focus(), 350);
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    if (location.hash) {
+    if (location.hash === "#contact" || location.hash === "#enquiry" || location.hash === "#admissions") {
+      setTimeout(triggerEnquiryFocus, 150);
+    } else if (location.hash) {
       setTimeout(() => {
         const el = document.getElementById(location.hash.replace("#", ""));
         if (el) el.scrollIntoView({ behavior: "smooth" });
@@ -78,17 +95,16 @@ const PublicLayout = () => {
     } else {
       window.scrollTo({ top: 0 });
     }
-  }, [location.pathname, location.hash]);
+  }, [location.pathname, location.hash, triggerEnquiryFocus]);
 
   const scrollToEnquiry = useCallback(() => {
     if (location.pathname !== "/") {
       navigate("/#contact");
+      setTimeout(triggerEnquiryFocus, 300);
     } else {
-      const el = document.getElementById("enquiry-form");
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-      else document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" });
+      triggerEnquiryFocus();
     }
-  }, [location.pathname, navigate]);
+  }, [location.pathname, navigate, triggerEnquiryFocus]);
 
   const outletCtx = useMemo(() => ({ scrollToEnquiry }), [scrollToEnquiry]);
 
@@ -115,9 +131,14 @@ const HomePageWrapper = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const scrollToEnquiry = () => {
-    const el = document.getElementById("enquiry-form");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    else document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" });
+    const el = document.getElementById("enquiry-form") || document.getElementById("contact");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-4", "ring-[#c99f3b]", "transition-all", "duration-500");
+      setTimeout(() => el.classList.remove("ring-4", "ring-[#c99f3b]"), 2500);
+      const input = el.querySelector("input");
+      if (input) setTimeout(() => input.focus(), 350);
+    }
   };
   return <HomePage onEnquiry={scrollToEnquiry} />;
 };
@@ -134,6 +155,9 @@ function App() {
             <Routes>
               <Route element={<PublicLayout />}>
                 <Route path="/" element={<HomePageWrapper />} />
+                <Route path="/apply" element={<Navigate to="/#contact" replace />} />
+                <Route path="/admissions" element={<Navigate to="/#contact" replace />} />
+                <Route path="/enquiry" element={<Navigate to="/#contact" replace />} />
                 <Route path="/fees" element={<FeesPage />} />
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/careers" element={<CareersPage />} />

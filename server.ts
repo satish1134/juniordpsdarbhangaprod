@@ -16,6 +16,7 @@ import {
   saveDbCredentials,
   testZohoAccountConnection,
   getCredentialsConfigStatus,
+  getZohoPassword,
 } from "./src/server/zohoImapSync";
 
 
@@ -246,18 +247,20 @@ function getMailTransporter(mailbox: "principal" | "info" | "account" = "princip
   const host = (process.env.ZOHO_SMTP_HOST || "smtp.zoho.com").trim();
   const port = parseInt(process.env.ZOHO_SMTP_PORT || "587", 10);
 
-  let user = "";
-  let pass = "";
+  let user = `${mailbox}@juniordpsdarbhanga.com`;
+  let pass = getZohoPassword(mailbox) || "";
 
-  if (mailbox === "info") {
-    user = (process.env.ZOHO_SMTP_USER_INFO || "info@juniordpsdarbhanga.com").trim();
-    pass = (process.env.ZOHO_SMTP_PASS_INFO || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
-  } else if (mailbox === "account") {
-    user = (process.env.ZOHO_SMTP_USER_ACCOUNT || "account@juniordpsdarbhanga.com").trim();
-    pass = (process.env.ZOHO_SMTP_PASS_ACCOUNT || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
-  } else {
-    user = (process.env.ZOHO_SMTP_USER_PRINCIPAL || process.env.ZOHO_SMTP_USER || "principal@juniordpsdarbhanga.com").trim();
-    pass = (process.env.ZOHO_SMTP_PASS_PRINCIPAL || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+  if (!pass) {
+    if (mailbox === "info") {
+      user = (process.env.ZOHO_SMTP_USER_INFO || "info@juniordpsdarbhanga.com").trim();
+      pass = (process.env.ZOHO_SMTP_PASS_INFO || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+    } else if (mailbox === "account") {
+      user = (process.env.ZOHO_SMTP_USER_ACCOUNT || "account@juniordpsdarbhanga.com").trim();
+      pass = (process.env.ZOHO_SMTP_PASS_ACCOUNT || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+    } else {
+      user = (process.env.ZOHO_SMTP_USER_PRINCIPAL || process.env.ZOHO_SMTP_USER || "principal@juniordpsdarbhanga.com").trim();
+      pass = (process.env.ZOHO_SMTP_PASS_PRINCIPAL || process.env.ZOHO_SMTP_PASS || "").replace(/\s+/g, "").trim();
+    }
   }
 
   // Generic fallback if mailbox-specific pass not found
@@ -609,9 +612,9 @@ const DEFAULT_CONTENT: Record<string, any> = {
   },
   email_settings: {
     enabled: true,
-    recipients: "juniordpsdarbhanga@gmail.com",
+    recipients: "info@juniordpsdarbhanga.com",
     from_email: "onboarding@resend.dev",
-    reply_to: "",
+    reply_to: "info@juniordpsdarbhanga.com",
     subject: "New Admission Enquiry — {name}",
     intro: "A parent has submitted a new admission enquiry from the school website. Details are below — please reach out within 24 hours.",
     send_parent_ack: false,
@@ -1516,26 +1519,31 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
       process.env.NOTIFICATION_EMAIL ||
       process.env.ADMIN_NOTIFICATION_EMAIL ||
       "";
-    const source = (envRecipient || customRecipients || "juniordpsdarbhanga@gmail.com").trim();
-    const list = source
+    const source = (customRecipients || envRecipient || "info@juniordpsdarbhanga.com").trim();
+    let list = source
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0 && s.includes("@"));
-    return list.length > 0 ? list : ["juniordpsdarbhanga@gmail.com"];
+
+    // If legacy placeholder was juniordpsdarbhanga@gmail.com and nothing else, use official info email
+    if (list.length === 1 && list[0] === "juniordpsdarbhanga@gmail.com") {
+      list = ["info@juniordpsdarbhanga.com"];
+    }
+
+    // Always guarantee info@juniordpsdarbhanga.com is in the recipient list
+    if (!list.includes("info@juniordpsdarbhanga.com")) {
+      list.unshift("info@juniordpsdarbhanga.com");
+    }
+
+    return list;
   }
 
   async function sendAdmissionEnquiryEmail(enquiry: Enquiry, isTest = false): Promise<{ sent_to_admin: boolean; sent_to_parent: boolean; error?: string; resend_id?: string }> {
-    const apiKey = getResendKey();
-    if (!apiKey) {
-      console.log("[Resend] Skipped: No RESEND_API_KEY configured.");
-      return { sent_to_admin: false, sent_to_parent: false, error: "No RESEND_API_KEY configured in environment" };
-    }
-
     let emailSettings = DEFAULT_CONTENT.email_settings || {
       enabled: true,
-      recipients: "juniordpsdarbhanga@gmail.com",
+      recipients: "info@juniordpsdarbhanga.com",
       from_email: "onboarding@resend.dev",
-      reply_to: "",
+      reply_to: "info@juniordpsdarbhanga.com",
       subject: "New Admission Enquiry — {name}",
       intro: "A parent has submitted a new admission enquiry from the school website. Details are below — please reach out within 24 hours.",
       send_parent_ack: false,
@@ -1653,98 +1661,128 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
     let sentToAdmin = false;
     let sentToParent = false;
     let adminResendId = "";
+    let lastError = "";
 
-    try {
-      const resend = new Resend(apiKey);
-      const adminResult = await resend.emails.send({
-        from: sender,
-        to: recipients,
-        replyTo: replyTo,
-        subject: subject,
-        html: adminHtml,
-      });
+    // 1. Try Resend if RESEND_API_KEY is configured
+    const apiKey = getResendKey();
+    if (apiKey) {
+      try {
+        const resend = new Resend(apiKey);
+        const adminResult = await resend.emails.send({
+          from: sender,
+          to: recipients,
+          replyTo: replyTo,
+          subject: subject,
+          html: adminHtml,
+        });
 
-      if (adminResult.error) {
-        console.error("[Resend] Admin dispatch error:", adminResult.error);
-        return { sent_to_admin: false, sent_to_parent: false, error: adminResult.error.message || JSON.stringify(adminResult.error) };
-      }
+        if (adminResult.error) {
+          console.error("[Resend] Admin dispatch error:", adminResult.error);
+          lastError = adminResult.error.message || JSON.stringify(adminResult.error);
+        } else {
+          sentToAdmin = true;
+          adminResendId = adminResult.data?.id || "";
+          console.log(`[Resend] Enquiry notification sent to ${recipients.join(", ")} [ID: ${adminResendId}]`);
+        }
 
-      sentToAdmin = true;
-      adminResendId = adminResult.data?.id || "";
-      console.log(`[Resend] Email sent to admin recipients (${recipients.join(", ")}) [ID: ${adminResendId}]`);
+        // Optional Parent Acknowledgement Email
+        if (emailSettings.send_parent_ack && enquiry.email && enquiry.email.includes("@")) {
+          try {
+            const parentAckSubject = (emailSettings.parent_ack_subject || "Thank you for your enquiry — Junior DPS Darbhanga")
+              .replace(/\{name\}/gi, enquiry.name || "")
+              .replace(/\{grade\}/gi, enquiry.grade || "");
 
-      // Optional Parent Acknowledgement Email
-      if (emailSettings.send_parent_ack && enquiry.email && enquiry.email.includes("@")) {
-        try {
-          const parentAckSubject = (emailSettings.parent_ack_subject || "Thank you for your enquiry — Junior DPS Darbhanga")
-            .replace(/\{name\}/gi, enquiry.name || "")
-            .replace(/\{grade\}/gi, enquiry.grade || "");
-
-          const parentHtml = `
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="utf-8" />
-              <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f3; color: #1c2a24; }
-                .container { max-width: 600px; margin: 24px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(10,61,41,0.08); border: 1px solid #e2ebe6; }
-                .header { background: #0a3d29; color: #fff9e6; padding: 28px 24px; text-align: center; }
-                .header h1 { margin: 0; font-size: 22px; font-weight: 700; color: #fff9e6; }
-                .header p { margin: 6px 0 0; font-size: 13px; color: #c99f3b; font-weight: 600; }
-                .content { padding: 28px 24px; line-height: 1.6; font-size: 14.5px; color: #2d3e35; }
-                .card { background: #f8faf8; border: 1px solid #e1e9e4; border-radius: 12px; padding: 18px; margin: 18px 0; }
-                .footer { background: #f4f6f3; padding: 18px 24px; text-align: center; font-size: 12px; color: #7f9389; border-top: 1px solid #e5ebe7; }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <div class="header">
-                  <h1>Junior DPS Darbhanga</h1>
-                  <p>CBSE Affiliated • Est. 2015</p>
-                </div>
-                <div class="content">
-                  <p>Dear <b>${enquiry.name || "Parent"}</b>,</p>
-                  <p>Thank you for reaching out to <b>Junior DPS Darbhanga</b>. We have successfully received your admission enquiry for <b>${enquiry.grade || "the upcoming session"}</b>.</p>
-                  <div class="card">
-                    <b style="color: #0a3d29;">What happens next?</b>
-                    <p style="margin: 6px 0 0; font-size: 13.5px; color: #4a5d53;">Our admissions team will review your details and call you on <b>${enquiry.phone || "your contact number"}</b> to guide you through the admission procedure and schedule a campus visit.</p>
+            const parentHtml = `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <meta charset="utf-8" />
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f3; color: #1c2a24; }
+                  .container { max-width: 600px; margin: 24px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(10,61,41,0.08); border: 1px solid #e2ebe6; }
+                  .header { background: #0a3d29; color: #fff9e6; padding: 28px 24px; text-align: center; }
+                  .header h1 { margin: 0; font-size: 22px; font-weight: 700; color: #fff9e6; }
+                  .header p { margin: 6px 0 0; font-size: 13px; color: #c99f3b; font-weight: 600; }
+                  .content { padding: 28px 24px; line-height: 1.6; font-size: 14.5px; color: #2d3e35; }
+                  .card { background: #f8faf8; border: 1px solid #e1e9e4; border-radius: 12px; padding: 18px; margin: 18px 0; }
+                  .footer { background: #f4f6f3; padding: 18px 24px; text-align: center; font-size: 12px; color: #7f9389; border-top: 1px solid #e5ebe7; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <div class="header">
+                    <h1>Junior DPS Darbhanga</h1>
+                    <p>CBSE Affiliated • Est. 2015</p>
                   </div>
-                  <p>If you have any urgent queries, please feel free to reach our admissions desk directly:</p>
-                  <p style="margin: 4px 0; color: #0a3d29;">📞 <b>+91 9470410815 / +91 9430008181</b></p>
-                  <p style="margin: 4px 0; color: #0a3d29;">📍 <b>Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004</b></p>
-                  <p style="margin-top: 24px;">Warm regards,<br /><b>Admissions Office</b><br />Junior DPS Darbhanga</p>
+                  <div class="content">
+                    <p>Dear <b>${enquiry.name || "Parent"}</b>,</p>
+                    <p>Thank you for reaching out to <b>Junior DPS Darbhanga</b>. We have successfully received your admission enquiry for <b>${enquiry.grade || "the upcoming session"}</b>.</p>
+                    <div class="card">
+                      <b style="color: #0a3d29;">What happens next?</b>
+                      <p style="margin: 6px 0 0; font-size: 13.5px; color: #4a5d53;">Our admissions team will review your details and call you on <b>${enquiry.phone || "your contact number"}</b> to guide you through the admission procedure and schedule a campus visit.</p>
+                    </div>
+                    <p>If you have any urgent queries, please feel free to reach our admissions desk directly:</p>
+                    <p style="margin: 4px 0; color: #0a3d29;">📞 <b>+91 9470410815 / +91 9430008181</b></p>
+                    <p style="margin: 4px 0; color: #0a3d29;">📍 <b>Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004</b></p>
+                    <p style="margin-top: 24px;">Warm regards,<br /><b>Admissions Office</b><br />Junior DPS Darbhanga</p>
+                  </div>
+                  <div class="footer">
+                    © Junior DPS Darbhanga. All rights reserved.
+                  </div>
                 </div>
-                <div class="footer">
-                  © Junior DPS Darbhanga. All rights reserved.
-                </div>
-              </div>
-            </body>
-          </html>
-          `;
+              </body>
+            </html>
+            `;
 
-          const parentResult = await resend.emails.send({
-            from: sender,
-            to: [enquiry.email],
-            subject: parentAckSubject,
-            html: parentHtml,
-          });
+            const parentResult = await resend.emails.send({
+              from: sender,
+              to: [enquiry.email],
+              subject: parentAckSubject,
+              html: parentHtml,
+            });
 
-          if (!parentResult.error) {
-            sentToParent = true;
-            console.log(`[Resend] Acknowledgement sent to parent (${enquiry.email})`);
-          } else {
-            console.error("[Resend] Parent email error:", parentResult.error);
+            if (!parentResult.error) {
+              sentToParent = true;
+              console.log(`[Resend] Acknowledgement sent to parent (${enquiry.email})`);
+            } else {
+              console.error("[Resend] Parent email error:", parentResult.error);
+            }
+          } catch (pErr) {
+            console.error("[Resend] Exception dispatching parent email:", pErr);
           }
-        } catch (pErr) {
-          console.error("[Resend] Exception dispatching parent email:", pErr);
+        }
+      } catch (err: any) {
+        console.error("[Resend] Exception sending email:", err);
+        lastError = err?.message || "Failed to send email via Resend";
+      }
+    }
+
+    // 2. Direct / fallback delivery via official Zoho SMTP to info@juniordpsdarbhanga.com
+    if (!sentToAdmin) {
+      const zohoTransporter = getMailTransporter("info") || getMailTransporter("principal");
+      if (zohoTransporter) {
+        try {
+          const zohoResult = await zohoTransporter.sendMail({
+            from: `"Junior DPS Darbhanga" <info@juniordpsdarbhanga.com>`,
+            to: recipients.join(", "),
+            replyTo: enquiry.email || replyTo,
+            subject: subject,
+            html: adminHtml,
+          });
+          sentToAdmin = true;
+          console.log(`[Zoho SMTP] Enquiry notification sent to ${recipients.join(", ")} (Message ID: ${zohoResult.messageId})`);
+        } catch (zErr: any) {
+          console.error("[Zoho SMTP] Failed to dispatch enquiry alert to info email:", zErr);
+          if (!lastError) lastError = zErr?.message || "Zoho SMTP dispatch failed";
         }
       }
-
-      return { sent_to_admin: sentToAdmin, sent_to_parent: sentToParent, resend_id: adminResendId };
-    } catch (err: any) {
-      console.error("[Resend] Exception sending email:", err);
-      return { sent_to_admin: false, sent_to_parent: false, error: err?.message || "Failed to send email via Resend" };
     }
+
+    if (!sentToAdmin && !apiKey) {
+      console.log(`[Email Dispatch] Enquiry notification for ${enquiry.name} (${enquiry.phone}) logged for ${recipients.join(", ")}.`);
+    }
+
+    return { sent_to_admin: sentToAdmin, sent_to_parent: sentToParent, resend_id: adminResendId, error: sentToAdmin ? undefined : lastError };
   }
 
   // Enquiries
@@ -2506,6 +2544,19 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
         }
       } catch (err) {
         console.error("[MongoDB] Read content error:", err);
+      }
+    }
+
+    if (result.email_settings) {
+      if (
+        !result.email_settings.recipients ||
+        result.email_settings.recipients === "juniordpsdarbhanga@gmail.com" ||
+        !result.email_settings.recipients.includes("info@juniordpsdarbhanga.com")
+      ) {
+        result.email_settings.recipients = "info@juniordpsdarbhanga.com";
+      }
+      if (!result.email_settings.reply_to) {
+        result.email_settings.reply_to = "info@juniordpsdarbhanga.com";
       }
     }
 

@@ -23,7 +23,10 @@ const Contact = () => {
     setLoading(true);
     try {
       await submitEnquiry(form);
-      toast({ title: "Enquiry submitted", description: "Thank you! Our admissions team will reach out within 24 hours." });
+      toast({
+        title: "Enquiry Submitted Successfully!",
+        description: "Thank you! Your enquiry has been received and routed to info@juniordpsdarbhanga.com. Our admissions desk will reach out within 24 hours.",
+      });
       setForm({ name: "", email: "", phone: "", grade: "", message: "" });
     } catch (err) {
       const msg = err?.response?.data?.detail || err.message || "Something went wrong";
@@ -79,11 +82,16 @@ const Contact = () => {
           </div>
 
           {/* Form */}
-          <form onSubmit={submit} id="enquiry-form" className="lg:col-span-7 bg-[#0a3d29] rounded-3xl p-8 md:p-10 relative overflow-hidden">
+          <form onSubmit={submit} id="enquiry-form" className="lg:col-span-7 bg-[#0a3d29] rounded-3xl p-8 md:p-10 relative overflow-hidden transition-all">
             <div className="blob w-[300px] h-[300px] bg-[#c99f3b] -top-20 -right-20 opacity-20" />
             <div className="relative">
-              <h3 className="font-display text-2xl md:text-3xl font-bold text-[#fff9e6]">Send us an enquiry</h3>
-              <p className="text-[14px] text-[#fff9e6]/70 mt-2">A parent-friendly form — takes less than a minute.</p>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#c99f3b]/20 text-[#c99f3b] text-xs font-bold uppercase tracking-wider mb-2">
+                <span>Apply for Admission & Enquiries</span>
+              </div>
+              <h3 className="font-display text-2xl md:text-3xl font-bold text-[#fff9e6]">Submit an Admission Enquiry</h3>
+              <p className="text-[14px] text-[#fff9e6]/80 mt-2">
+                Fill in this form to apply for admission or schedule a campus visit. Enquiries are routed directly to our admissions desk (<strong className="text-[#c99f3b]">info@juniordpsdarbhanga.com</strong>).
+              </p>
 
               <div className="mt-8 grid sm:grid-cols-2 gap-4">
                 <div>
