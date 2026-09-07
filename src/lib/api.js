@@ -137,6 +137,14 @@ export const resetContent = (section) => api.post(`/content/${section}/reset`);
 export const sendTestEnquiryEmail = () => api.post("/enquiries/test-email");
 export const fetchDbStatus = () => api.get("/db-status");
 
+export const fetchMailboxEmails = (params) => api.get("/mailbox/emails", { params });
+export const sendMailboxEmail = (payload) => api.post("/mailbox/send", payload);
+export const updateMailboxStatus = (id, status) => api.patch(`/mailbox/emails/${id}/status`, { status });
+export const toggleMailboxStar = (id) => api.patch(`/mailbox/emails/${id}/star`);
+export const deleteMailboxEmail = (id) => api.delete(`/mailbox/emails/${id}`);
+export const simulateTestIncoming = (payload) => api.post("/mailbox/test-incoming", payload);
+export const getMailboxConfig = () => api.get("/mailbox/config");
+
 export const resolveImageUrl = (url) => {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();

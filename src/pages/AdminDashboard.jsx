@@ -19,9 +19,11 @@ import { isSessionExpired, clearAdminSession } from "../lib/sessionManager";
 import { useContent } from "../lib/ContentContext";
 import { LOGO_RADIUS_CLASS, fontFamilyFor } from "../lib/displaySizes";
 import { logError } from "../lib/logger";
+import MailboxHub from "../components/MailboxHub";
 import {
   adminMe, adminLogout, listEnquiries, updateEnquiryStatus, deleteEnquiry,
   listAllNews, createNews, updateNews, deleteNews, fetchDbStatus, getAdminPath,
+  fetchMailboxEmails,
 } from "../lib/api";
 
 const statusColors = {
@@ -31,7 +33,8 @@ const statusColors = {
 };
 
 const AdminDashboard = () => {
-  const [tab, setTab] = useState("enquiries");
+  const [tab, setTab] = useState("mailbox");
+  const [mailboxUnread, setMailboxUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   const [enquiries, setEnquiries] = useState([]);
   const [news, setNews] = useState([]);
@@ -71,14 +74,18 @@ const AdminDashboard = () => {
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [e, n, db] = await Promise.allSettled([
+      const [e, n, db, mb] = await Promise.allSettled([
         listEnquiries(),
         listAllNews(),
         fetchDbStatus(),
+        fetchMailboxEmails(),
       ]);
       if (e.status === "fulfilled") setEnquiries(e.value.data || []);
       if (n.status === "fulfilled") setNews(n.value.data || []);
       if (db.status === "fulfilled") setDbStatus(db.value.data || null);
+      if (mb.status === "fulfilled" && mb.value.data?.counts) {
+        setMailboxUnread(mb.value.data.counts.total_unread || 0);
+      }
     } catch (err) {
       logError("Failed to refresh admin data:", err);
     }
@@ -249,6 +256,7 @@ const AdminDashboard = () => {
         {/* Tabs */}
         <div className="flex flex-wrap items-center gap-3 mb-8">
           {[
+            { key: "mailbox", label: "Official Mailbox", icon: Mail, count: mailboxUnread },
             { key: "enquiries", label: "Enquiries", icon: Inbox, count: counts.all },
             { key: "news", label: "News & Notices", icon: Newspaper, count: news.length },
             { key: "content", label: "Site Content", icon: Palette },
@@ -275,9 +283,12 @@ const AdminDashboard = () => {
           ))}
         </div>
 
-        {loading && tab !== "content" && tab !== "security" && tab !== "audit" && (
+        {loading && tab !== "content" && tab !== "security" && tab !== "audit" && tab !== "mailbox" && (
           <div className="text-center py-24"><Loader2 className="w-6 h-6 animate-spin inline text-[#0a5f3d]" /></div>
         )}
+
+        {/* Official Mailbox Hub */}
+        {tab === "mailbox" && <MailboxHub />}
 
         {/* Site Content */}
         {tab === "content" && (

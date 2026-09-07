@@ -8,6 +8,7 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import { MongoClient, Db, GridFSBucket, ObjectId } from "mongodb";
 import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 
 const PORT = 3000;
@@ -210,6 +211,43 @@ interface Enquiry {
 }
 
 const enquiries: Enquiry[] = [];
+
+export interface MailboxMessage {
+  id: string;
+  mailbox: "principal" | "info" | "account";
+  direction: "inbound" | "outbound";
+  from: string;
+  from_name?: string;
+  to: string[];
+  reply_to?: string;
+  subject: string;
+  body: string;
+  html?: string;
+  status: "unread" | "read" | "replied" | "sent" | "archived";
+  starred?: boolean;
+  tags?: string[];
+  created_at: string;
+  in_reply_to_id?: string;
+  delivery_info?: Record<string, any>;
+}
+
+// Live real in-memory cache (starts clean with zero fake emails)
+const liveMailboxMessages: MailboxMessage[] = [];
+
+function getMailTransporter() {
+  const user = (process.env.ZOHO_SMTP_USER || "").trim();
+  const pass = (process.env.ZOHO_SMTP_PASS || "").trim();
+  const host = (process.env.ZOHO_SMTP_HOST || "smtp.zoho.com").trim();
+  const port = parseInt(process.env.ZOHO_SMTP_PORT || "587", 10);
+  if (!user || !pass) return null;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
+  });
+}
 
 interface NewsItem {
   id: string;
@@ -1759,6 +1797,399 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
 
     auditLog("enquiry.deleted", (req as any).user?.sub, req, { id });
     res.json({ ok: true });
+  });
+
+  // ==========================================
+  // REAL MAILBOX HUB & INBOUND WEBHOOK (Approach A)
+  // ==========================================
+
+  // Public Inbound Email Webhook (Called by Cloudflare Email Worker, SendGrid Inbound Parse, etc.)
+  apiRouter.post("/webhooks/inbound-email", async (req, res) => {
+    const secret = process.env.INBOUND_WEBHOOK_SECRET;
+    if (secret) {
+      const providedSecret = req.headers["x-webhook-secret"] || req.query.secret;
+      if (providedSecret !== secret) {
+        return res.status(401).json({ error: "Invalid webhook secret" });
+      }
+    }
+
+    try {
+      const body = req.body || {};
+      const rawTo = body.to || body.recipient || body.envelope?.to || "principal@juniordpsdarbhanga.com";
+      const toArr: string[] = Array.isArray(rawTo)
+        ? rawTo
+        : typeof rawTo === "string"
+        ? rawTo.split(",").map((s) => s.trim())
+        : ["principal@juniordpsdarbhanga.com"];
+
+      const toStr = toArr.join(" ").toLowerCase();
+      let mailbox: "principal" | "info" | "account" = "principal";
+      if (toStr.includes("account@") || toStr.includes("accounts@")) {
+        mailbox = "account";
+      } else if (toStr.includes("info@")) {
+        mailbox = "info";
+      } else {
+        mailbox = "principal";
+      }
+
+      let fromAddress = "sender@external.com";
+      let fromName = "External Sender";
+      const rawFrom = body.from || body.sender || body.envelope?.from || "";
+      if (typeof rawFrom === "string") {
+        const match = rawFrom.match(/^(.*?)\s*<([^>]+)>$/);
+        if (match) {
+          fromName = match[1].replace(/["']/g, "").trim() || match[2];
+          fromAddress = match[2].trim();
+        } else {
+          fromAddress = rawFrom.trim();
+          fromName = rawFrom.split("@")[0] || rawFrom;
+        }
+      } else if (typeof rawFrom === "object" && rawFrom !== null) {
+        fromAddress = rawFrom.address || rawFrom.email || "sender@external.com";
+        fromName = rawFrom.name || fromAddress;
+      }
+
+      const subject = body.subject || "(No Subject)";
+      const text = body.text || body.body || body.message || "";
+      const html = body.html || "";
+
+      const msg: MailboxMessage = {
+        id: "msg-" + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+        mailbox,
+        direction: "inbound",
+        from: fromAddress,
+        from_name: fromName,
+        to: toArr,
+        reply_to: body.reply_to || fromAddress,
+        subject,
+        body: text || (html ? html.replace(/<[^>]+>/g, " ").trim() : "(Empty email body)"),
+        html: html || undefined,
+        status: "unread",
+        starred: false,
+        tags: ["Inbound", mailbox],
+        created_at: body.date || new Date().toISOString(),
+        delivery_info: {
+          source: (req.headers["user-agent"] as string) || "webhook",
+          received_at: new Date().toISOString(),
+        },
+      };
+
+      liveMailboxMessages.unshift(msg);
+
+      const db = await getDb();
+      if (db) {
+        await db.collection("incoming_emails").insertOne({ ...msg, _id: msg.id as any });
+      }
+
+      console.log(`[Mailbox Webhook] Inbound email received for ${mailbox}@: "${subject}" from ${fromAddress}`);
+      res.json({ ok: true, id: msg.id, mailbox: msg.mailbox });
+    } catch (err: any) {
+      console.error("[Mailbox Webhook] Error processing email:", err);
+      res.status(500).json({ error: "Failed to process incoming email", details: err?.message });
+    }
+  });
+
+  // Admin Mailbox List
+  apiRouter.get("/mailbox/emails", requireAdmin, async (req, res) => {
+    const { mailbox = "all", status = "all", search = "" } = req.query as Record<string, string>;
+    const db = await getDb();
+    let allItems: MailboxMessage[] = [];
+
+    if (db) {
+      try {
+        const docs = await db.collection("incoming_emails").find({}).sort({ created_at: -1 }).toArray();
+        allItems = docs.map((d: any) => ({
+          id: d.id || d._id?.toString(),
+          mailbox: d.mailbox || "principal",
+          direction: d.direction || "inbound",
+          from: d.from || "",
+          from_name: d.from_name || "",
+          to: Array.isArray(d.to) ? d.to : [d.to || ""],
+          reply_to: d.reply_to || "",
+          subject: d.subject || "",
+          body: d.body || "",
+          html: d.html,
+          status: d.status || "unread",
+          starred: !!d.starred,
+          tags: d.tags || [],
+          created_at: d.created_at || new Date().toISOString(),
+          in_reply_to_id: d.in_reply_to_id,
+          delivery_info: d.delivery_info,
+        }));
+      } catch (err) {
+        console.error("[MongoDB] Fetch mailbox error:", err);
+        allItems = [...liveMailboxMessages];
+      }
+    } else {
+      allItems = [...liveMailboxMessages];
+    }
+
+    let filtered = [...allItems];
+    if (mailbox && mailbox !== "all") {
+      filtered = filtered.filter((m) => m.mailbox === mailbox);
+    }
+    if (status && status !== "all") {
+      if (status === "starred") {
+        filtered = filtered.filter((m) => !!m.starred);
+      } else if (status === "outbound") {
+        filtered = filtered.filter((m) => m.direction === "outbound");
+      } else {
+        filtered = filtered.filter((m) => m.status === status);
+      }
+    }
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (m) =>
+          m.subject.toLowerCase().includes(q) ||
+          m.body.toLowerCase().includes(q) ||
+          m.from.toLowerCase().includes(q) ||
+          (m.from_name && m.from_name.toLowerCase().includes(q))
+      );
+    }
+
+    const counts = {
+      all: allItems.length,
+      total_unread: allItems.filter((m) => m.direction === "inbound" && m.status === "unread").length,
+      principal_unread: allItems.filter((m) => m.mailbox === "principal" && m.status === "unread").length,
+      info_unread: allItems.filter((m) => m.mailbox === "info" && m.status === "unread").length,
+      account_unread: allItems.filter((m) => m.mailbox === "account" && m.status === "unread").length,
+      starred: allItems.filter((m) => !!m.starred).length,
+      outbound: allItems.filter((m) => m.direction === "outbound").length,
+    };
+
+    res.json({ emails: filtered, counts });
+  });
+
+  // Admin Mailbox: Send Outbound Email / Reply
+  apiRouter.post("/mailbox/send", requireAdmin, async (req, res) => {
+    const { mailbox = "principal", to, subject, body, in_reply_to_id } = req.body || {};
+    if (!to || !subject || !body) {
+      return res.status(400).json({ error: "Recipient email (to), subject, and body are required." });
+    }
+
+    const validMailbox = ["principal", "info", "account"].includes(mailbox) ? mailbox : "principal";
+    const fromAddress = `${validMailbox}@juniordpsdarbhanga.com`;
+    const fromDisplayName =
+      validMailbox === "principal"
+        ? "Principal — Junior DPS Darbhanga"
+        : validMailbox === "account"
+        ? "Accounts Office — Junior DPS Darbhanga"
+        : "Admissions & Info — Junior DPS Darbhanga";
+
+    let dispatchResult: any = null;
+    let dispatchMethod = "unconfigured";
+
+    // 1. Try Zoho SMTP via nodemailer if credentials provided in env
+    const transporter = getMailTransporter();
+    if (transporter) {
+      try {
+        dispatchResult = await transporter.sendMail({
+          from: `"${fromDisplayName}" <${fromAddress}>`,
+          to,
+          subject,
+          text: body,
+        });
+        dispatchMethod = "zoho_smtp";
+      } catch (err: any) {
+        console.error("[Mailbox SMTP Error]:", err?.message || err);
+      }
+    }
+
+    // 2. Fall back to Resend if SMTP not configured or failed
+    if (!dispatchResult) {
+      const resendKey = getResendKey();
+      if (resendKey) {
+        try {
+          const resend = new Resend(resendKey);
+          dispatchResult = await resend.emails.send({
+            from: `Junior DPS Darbhanga <onboarding@resend.dev>`,
+            replyTo: fromAddress,
+            to: Array.isArray(to) ? to : [to],
+            subject: `[${fromDisplayName}] ${subject}`,
+            text: `${body}\n\n---\nJunior DPS Darbhanga | Official Correspondence\n${fromAddress}`,
+          });
+          dispatchMethod = "resend";
+        } catch (err: any) {
+          console.warn("[Mailbox Resend Warning]:", err?.message || err);
+        }
+      }
+    }
+
+    const outMsg: MailboxMessage = {
+      id: "out-" + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+      mailbox: validMailbox as any,
+      direction: "outbound",
+      from: fromAddress,
+      from_name: fromDisplayName,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      body,
+      status: "sent",
+      starred: false,
+      tags: ["Sent", validMailbox],
+      created_at: new Date().toISOString(),
+      in_reply_to_id,
+      delivery_info: { method: dispatchMethod, result: dispatchResult },
+    };
+
+    liveMailboxMessages.unshift(outMsg);
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("incoming_emails").insertOne({ ...outMsg, _id: outMsg.id as any });
+        if (in_reply_to_id) {
+          await db.collection("incoming_emails").updateOne(
+            { $or: [{ id: in_reply_to_id }, { _id: in_reply_to_id as any }] },
+            { $set: { status: "replied", updated_at: new Date() } }
+          );
+        }
+      } catch (err) {
+        console.error("[MongoDB] Insert outbound email error:", err);
+      }
+    }
+
+    if (in_reply_to_id) {
+      const existing = liveMailboxMessages.find((m) => m.id === in_reply_to_id);
+      if (existing) existing.status = "replied";
+    }
+
+    auditLog("mailbox.email_sent", (req as any).user?.sub, req, {
+      to,
+      subject,
+      mailbox: validMailbox,
+      method: dispatchMethod,
+    });
+
+    res.json({ ok: true, message: outMsg, method: dispatchMethod });
+  });
+
+  // Admin Mailbox: Update Status (mark read / unread)
+  apiRouter.patch("/mailbox/emails/:id/status", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const item = liveMailboxMessages.find((m) => m.id === id);
+    if (item && status) item.status = status;
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("incoming_emails").updateOne(
+          { $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])] },
+          { $set: { status, updated_at: new Date() } }
+        );
+      } catch (err) {
+        console.error("[MongoDB] Update email status error:", err);
+      }
+    }
+    res.json({ ok: true, id, status });
+  });
+
+  // Admin Mailbox: Toggle Star
+  apiRouter.patch("/mailbox/emails/:id/star", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const item = liveMailboxMessages.find((m) => m.id === id);
+    let starred = false;
+    if (item) {
+      item.starred = !item.starred;
+      starred = item.starred;
+    }
+
+    const db = await getDb();
+    if (db) {
+      try {
+        const existing = await db.collection("incoming_emails").findOne({
+          $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])],
+        });
+        if (existing) {
+          starred = !existing.starred;
+          await db.collection("incoming_emails").updateOne(
+            { _id: existing._id },
+            { $set: { starred, updated_at: new Date() } }
+          );
+        }
+      } catch (err) {
+        console.error("[MongoDB] Toggle star error:", err);
+      }
+    }
+    res.json({ ok: true, id, starred });
+  });
+
+  // Admin Mailbox: Delete Email
+  apiRouter.delete("/mailbox/emails/:id", requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const idx = liveMailboxMessages.findIndex((m) => m.id === id);
+    if (idx !== -1) liveMailboxMessages.splice(idx, 1);
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("incoming_emails").deleteOne({
+          $or: [{ id }, { _id: id as any }, ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])],
+        });
+      } catch (err) {
+        console.error("[MongoDB] Delete email error:", err);
+      }
+    }
+    res.json({ ok: true });
+  });
+
+  // Admin Mailbox: Test Simulator (Send real simulated incoming email to verify flow)
+  apiRouter.post("/mailbox/test-incoming", requireAdmin, async (req, res) => {
+    const {
+      mailbox = "principal",
+      from = "sandyverma3@gmail.com",
+      from_name = "Sandy Verma (Test)",
+      subject = "Test Inbound Email Verification",
+      body = "This is a live test email sent into the Admin Panel Mailbox to verify incoming delivery.",
+    } = req.body || {};
+
+    const msg: MailboxMessage = {
+      id: "test-" + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+      mailbox: ["principal", "info", "account"].includes(mailbox) ? mailbox : "principal",
+      direction: "inbound",
+      from,
+      from_name,
+      to: [`${mailbox}@juniordpsdarbhanga.com`],
+      reply_to: from,
+      subject,
+      body,
+      status: "unread",
+      starred: false,
+      tags: ["Test", "Inbound"],
+      created_at: new Date().toISOString(),
+      delivery_info: { test: true, triggered_by: (req as any).user?.sub },
+    };
+
+    liveMailboxMessages.unshift(msg);
+
+    const db = await getDb();
+    if (db) {
+      await db.collection("incoming_emails").insertOne({ ...msg, _id: msg.id as any });
+    }
+
+    auditLog("mailbox.test_simulated", (req as any).user?.sub, req, { id: msg.id, mailbox, from });
+    res.json({ ok: true, message: msg });
+  });
+
+  // Admin Mailbox: Configuration & Webhook Guide
+  apiRouter.get("/mailbox/config", requireAdmin, async (req, res) => {
+    const protocol = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+    const host = req.get("host") || "juniordpsdarbhanga.com";
+    const webhookUrl = `${protocol}://${host}/api/webhooks/inbound-email`;
+
+    res.json({
+      webhook_url: webhookUrl,
+      smtp_configured: !!(process.env.ZOHO_SMTP_USER && process.env.ZOHO_SMTP_PASS),
+      resend_configured: !!getResendKey(),
+      has_webhook_secret: !!process.env.INBOUND_WEBHOOK_SECRET,
+      mailboxes: [
+        { id: "principal", address: "principal@juniordpsdarbhanga.com", role: "Principal & Academic Leadership" },
+        { id: "info", address: "info@juniordpsdarbhanga.com", role: "General Admissions & Enquiries" },
+        { id: "account", address: "account@juniordpsdarbhanga.com", role: "Fee Receipts & Accounts Office" },
+      ],
+    });
   });
 
   // News
