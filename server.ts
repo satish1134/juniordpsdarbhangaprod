@@ -1005,6 +1005,56 @@ apiRouter.get("/db-status", async (req, res) => {
   });
 });
 
+apiRouter.get("/admin/system-metrics", requireAdmin, async (req, res) => {
+  const db = await getDb();
+  let dbPingMs = 0;
+  let dbStatus = "disconnected";
+  if (db) {
+    try {
+      const start = Date.now();
+      await db.command({ ping: 1 });
+      dbPingMs = Date.now() - start;
+      dbStatus = "connected";
+    } catch {
+      dbStatus = "error";
+    }
+  }
+
+  const mem = process.memoryUsage();
+  const uptimeSeconds = Math.floor(process.uptime());
+  const hours = Math.floor(uptimeSeconds / 3600);
+  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+  const seconds = uptimeSeconds % 60;
+
+  res.json({
+    ok: true,
+    server: {
+      uptime_seconds: uptimeSeconds,
+      uptime_formatted: `${hours}h ${minutes}m ${seconds}s`,
+      memory_rss_mb: Math.round(mem.rss / (1024 * 1024)),
+      memory_heap_used_mb: Math.round(mem.heapUsed / (1024 * 1024)),
+      memory_heap_total_mb: Math.round(mem.heapTotal / (1024 * 1024)),
+      node_version: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      env: process.env.NODE_ENV || "development",
+    },
+    database: {
+      status: dbStatus,
+      ping_ms: dbPingMs,
+      type: "MongoDB 7.0 (Dockerized)",
+    },
+    services: {
+      zoho_smtp_configured: !!(process.env.ZOHO_SMTP_PASS_PRINCIPAL || process.env.ZOHO_SMTP_PASS),
+      zoho_smtp_host: process.env.ZOHO_SMTP_HOST || "smtp.zoho.com",
+      zoho_smtp_port: process.env.ZOHO_SMTP_PORT || "587",
+      resend_fallback_configured: !!process.env.RESEND_API_KEY,
+      inbound_webhook_ready: true,
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Admin Login
 const handleAdminLogin = async (req: any, res: any) => {
   try {

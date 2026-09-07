@@ -14,6 +14,7 @@ import ContentEditor from "../components/ContentEditor";
 import TwoFactorPanel from "../components/TwoFactorPanel";
 import AuditLogPanel from "../components/AuditLogPanel";
 import AdminSessionWarning from "../components/AdminSessionWarning";
+import SystemHealthModal from "../components/SystemHealthModal";
 import { useAdminInactivity } from "../hooks/useAdminInactivity";
 import { isSessionExpired, clearAdminSession } from "../lib/sessionManager";
 import { useContent } from "../lib/ContentContext";
@@ -35,6 +36,7 @@ const statusColors = {
 const AdminDashboard = () => {
   const [tab, setTab] = useState("mailbox");
   const [mailboxUnread, setMailboxUnread] = useState(0);
+  const [showHealthModal, setShowHealthModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [enquiries, setEnquiries] = useState([]);
   const [news, setNews] = useState([]);
@@ -217,21 +219,19 @@ const AdminDashboard = () => {
               <span>Auto-Logout: 5m idle</span>
             </div>
             {dbStatus && (
-              <div
-                className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${
+              <button
+                type="button"
+                onClick={() => setShowHealthModal(true)}
+                className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer transition shadow-sm ${
                   dbStatus.connected
-                    ? "bg-[#0a5f3d]/30 text-[#fff9e6] border-[#0a5f3d]/60"
-                    : "bg-[#c99f3b]/20 text-[#c99f3b] border-[#c99f3b]/40"
+                    ? "bg-[#0a5f3d]/40 text-[#fff9e6] border-[#0a5f3d]/80 hover:bg-[#0a5f3d]/60"
+                    : "bg-[#c99f3b]/20 text-[#c99f3b] border-[#c99f3b]/40 hover:bg-[#c99f3b]/30"
                 }`}
-                title={
-                  dbStatus.connected
-                    ? `Connected to MongoDB Atlas (${dbStatus.database_name})`
-                    : "Running on in-memory storage (Set MONGO_URL in environment to connect Atlas)"
-                }
+                title="Click to view real-time Production VPS & System Health observability"
               >
                 <span className={`w-2 h-2 rounded-full ${dbStatus.connected ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-                {dbStatus.connected ? "MongoDB Atlas Active" : "In-Memory Mode"}
-              </div>
+                <span>{dbStatus.connected ? "VPS & MongoDB Live ↗" : "In-Memory Mode ↗"}</span>
+              </button>
             )}
             <a
               href="https://www.zoho.com/mail/login.html"
@@ -521,6 +521,12 @@ const AdminDashboard = () => {
         remainingSeconds={remainingSeconds}
         onExtend={resetActivity}
         onLogout={logout}
+      />
+
+      {/* Production VPS & System Health Modal */}
+      <SystemHealthModal
+        open={showHealthModal}
+        onOpenChange={setShowHealthModal}
       />
     </div>
   );
