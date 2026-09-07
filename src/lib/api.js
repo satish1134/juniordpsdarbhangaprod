@@ -128,13 +128,6 @@ export const listEnquiries = () => api.get("/enquiries");
 export const updateEnquiryStatus = (id, status) => api.patch(`/enquiries/${id}`, { status });
 export const deleteEnquiry = (id) => api.delete(`/enquiries/${id}`);
 
-// Official Mailbox Hub API
-export const fetchOfficialEmails = ({ mailbox = "all", status = "all", search = "" } = {}) =>
-  api.get("/official-emails", { params: { mailbox, status, search } });
-export const sendOfficialEmail = (payload) => api.post("/official-emails/send", payload);
-export const updateOfficialEmailStatus = (id, status) => api.patch(`/official-emails/${id}/status`, { status });
-export const toggleOfficialEmailStar = (id) => api.patch(`/official-emails/${id}/star`);
-export const deleteOfficialEmail = (id) => api.delete(`/official-emails/${id}`);
 export const listAllNews = () => api.get("/news/all");
 export const createNews = (payload) => api.post("/news", payload);
 export const updateNews = (id, payload) => api.put(`/news/${id}`, payload);
