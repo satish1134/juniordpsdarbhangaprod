@@ -146,6 +146,9 @@ export const simulateTestIncoming = (payload) => api.post("/mailbox/test-incomin
 export const getMailboxConfig = () => api.get("/mailbox/config");
 export const syncZohoMailbox = () => api.post("/mailbox/sync-zoho");
 export const getZohoSyncStatus = () => api.get("/mailbox/sync-status");
+export const getMailboxCredentialsStatus = () => api.get("/mailbox/credentials-status");
+export const saveMailboxCredentials = (payload) => api.post("/mailbox/save-credentials", payload);
+export const testMailboxConnection = (mailboxKey) => api.post("/mailbox/test-connection", { mailboxKey });
 export const fetchSystemMetrics = () => api.get("/admin/system-metrics");
 
 export const resolveImageUrl = (url) => {

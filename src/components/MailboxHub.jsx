@@ -20,6 +20,10 @@ import {
   Sparkles,
   Sliders,
   Filter,
+  Key,
+  Info,
+  Settings,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -32,6 +36,9 @@ import {
   getMailboxConfig,
   syncZohoMailbox,
   getZohoSyncStatus,
+  getMailboxCredentialsStatus,
+  saveMailboxCredentials,
+  testMailboxConnection,
 } from "../lib/api";
 
 const MAILBOX_OPTIONS = [
@@ -58,6 +65,15 @@ export default function MailboxHub() {
   // Modals & Drawers
   const [showCompose, setShowCompose] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
+  const [showZohoSettings, setShowZohoSettings] = useState(false);
+
+  // Credentials & Diagnostics State
+  const [credStatus, setCredStatus] = useState(null);
+  const [passwordInputs, setPasswordsInput] = useState({ principal: "", info: "", account: "" });
+  const [savingCreds, setSavingCreds] = useState(false);
+  const [credSaveNotice, setCredSaveNotice] = useState(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState(null);
 
   // Compose State
   const [composeData, setComposeData] = useState({
@@ -80,6 +96,53 @@ export default function MailboxHub() {
   });
   const [testing, setTesting] = useState(false);
 
+  // Load Credentials Status
+  const loadCredentialsStatus = async () => {
+    try {
+      const res = await getMailboxCredentialsStatus();
+      if (res.data?.credentials) setCredStatus(res.data.credentials);
+    } catch {}
+  };
+
+  // Save Credentials directly to MongoDB
+  const handleSaveCredentials = async (e) => {
+    e.preventDefault();
+    setSavingCreds(true);
+    setCredSaveNotice(null);
+    try {
+      const toSend = {};
+      if (passwordInputs.principal) toSend.principal = passwordInputs.principal;
+      if (passwordInputs.info) toSend.info = passwordInputs.info;
+      if (passwordInputs.account) toSend.account = passwordInputs.account;
+      const res = await saveMailboxCredentials(toSend);
+      if (res.data?.credentials) setCredStatus(res.data.credentials);
+      setCredSaveNotice({ type: "success", text: "✓ App password(s) saved securely in system database!" });
+      setPasswordsInput({ principal: "", info: "", account: "" });
+    } catch (err) {
+      setCredSaveNotice({ type: "error", text: err?.response?.data?.error || "Failed to save password." });
+    } finally {
+      setSavingCreds(false);
+      setTimeout(() => setCredSaveNotice(null), 6000);
+    }
+  };
+
+  // Run live connection test against Zoho IMAP
+  const handleTestConnection = async (mailboxKey = "principal") => {
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+    try {
+      const res = await testMailboxConnection(mailboxKey);
+      setConnectionTestResult(res.data);
+    } catch (err) {
+      setConnectionTestResult({
+        success: false,
+        message: err?.response?.data?.error || "Failed to contact Zoho server",
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
   // Trigger manual Zoho IMAP Sync
   const handleSyncZoho = async () => {
     setSyncingZoho(true);
@@ -88,20 +151,42 @@ export default function MailboxHub() {
       const res = await syncZohoMailbox();
       if (res.data && res.data.ok) {
         const count = res.data.totalNew || 0;
+        const results = res.data.results || {};
+        const errors = Object.entries(results)
+          .filter(([_, r]) => r && r.success === false && r.error)
+          .map(([k, r]) => `${k}@: ${r.error}`);
+
         if (count > 0) {
-          setSyncNotice({ type: "success", text: `✓ Synced ${count} new email${count > 1 ? "s" : ""} from Zoho!` });
+          setSyncNotice({
+            type: "success",
+            text: `✓ Synced ${count} new email${count > 1 ? "s" : ""} from Zoho!`,
+          });
+        } else if (errors.length > 0) {
+          setSyncNotice({
+            type: "error",
+            text: `Zoho Sync Status: ${errors.join(" | ")}`,
+          });
         } else {
-          setSyncNotice({ type: "info", text: "✓ Zoho Mailbox is completely in sync. No new unread messages." });
+          setSyncNotice({
+            type: "info",
+            text: "✓ Checked Zoho Mail: No new unread messages in inbox.",
+          });
         }
         await loadEmails(true);
       } else {
-        setSyncNotice({ type: "error", text: res.data?.error || "Zoho sync error. Check app password in secrets." });
+        setSyncNotice({
+          type: "error",
+          text: res.data?.error || "Zoho sync error. Check app password in secrets.",
+        });
       }
     } catch (err) {
-      setSyncNotice({ type: "error", text: err?.response?.data?.error || "Failed to reach Zoho IMAP server." });
+      setSyncNotice({
+        type: "error",
+        text: err?.response?.data?.error || "Failed to reach Zoho IMAP server.",
+      });
     } finally {
       setSyncingZoho(false);
-      setTimeout(() => setSyncNotice(null), 6000);
+      setTimeout(() => setSyncNotice(null), 9000);
     }
   };
 
@@ -139,6 +224,7 @@ export default function MailboxHub() {
     getMailboxConfig()
       .then((res) => setConfig(res.data))
       .catch(() => {});
+    loadCredentialsStatus();
   }, []);
 
   // Handle email click
@@ -273,6 +359,23 @@ export default function MailboxHub() {
             >
               <RefreshCw className={`w-3.5 h-3.5 text-[#c99f3b] ${syncingZoho ? "animate-spin" : ""}`} />
               {syncingZoho ? "Syncing Zoho..." : "Sync Zoho Mail"}
+            </button>
+
+            <button
+              onClick={() => {
+                setShowZohoSettings(true);
+                loadCredentialsStatus();
+              }}
+              className="px-3 py-1.5 text-[12px] font-medium rounded-lg bg-white/10 hover:bg-white/20 border border-white/25 text-white transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Configure Zoho App Password and run IMAP connection test"
+            >
+              <Key className="w-3.5 h-3.5 text-[#c99f3b]" />
+              <span>Zoho Setup & Diagnostics</span>
+              {credStatus?.principal ? (
+                <span className="w-2 h-2 rounded-full bg-emerald-400" title="Password Configured" />
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-amber-400" title="Password Not Set" />
+              )}
             </button>
 
             <button
@@ -905,6 +1008,273 @@ export default function MailboxHub() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Zoho Setup & Diagnostics Modal */}
+      {showZohoSettings && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden my-8 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-[#0a3d29] text-white p-5 flex items-center justify-between border-b border-[#c99f3b]/30">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-[#c99f3b]/20 text-[#c99f3b]">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-lg text-[#fff9e6]">Zoho Mail Setup & Diagnostics</h4>
+                  <p className="text-xs text-[#fff9e6]/70">Configure credentials, test IMAP synchronization, and inspect delivery</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowZohoSettings(false)}
+                className="text-white/70 hover:text-white text-lg font-bold px-2 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+              {/* Important Explainer Card */}
+              <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-200/80 space-y-2.5">
+                <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Where do replies sent to your school email arrive?</span>
+                </div>
+                <p className="text-xs text-amber-900/90 leading-relaxed">
+                  When you sent an email from this portal, the recipient hit <strong>Reply</strong> to{" "}
+                  <code className="px-1.5 py-0.5 rounded bg-amber-100 font-mono text-[11px] font-bold">
+                    principal@juniordpsdarbhanga.com
+                  </code>
+                  . Their reply was delivered directly by Google/Gmail to your <strong>Zoho Mail</strong> inbox!
+                </p>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-amber-800 font-medium">
+                    Those replies are stored safely in your Zoho Webmail account right now.
+                  </span>
+                  <a
+                    href="https://mail.zoho.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0a3d29] text-[#fff9e6] hover:bg-[#0d4f36] text-xs font-bold transition shadow-xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-[#c99f3b]" /> Open Zoho Webmail ↗
+                  </a>
+                </div>
+              </div>
+
+              {/* Section: Live Connection Diagnostic */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h5 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4 text-emerald-600" />
+                      Live IMAP Connection Test
+                    </h5>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Tests whether Zoho allows this server to read incoming emails for{" "}
+                      <span className="font-mono text-slate-700">principal@juniordpsdarbhanga.com</span>
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => handleTestConnection("principal")}
+                    disabled={testingConnection}
+                    className="bg-[#0a3d29] hover:bg-[#0d4f36] text-white text-xs font-bold px-3 py-1.5"
+                  >
+                    {testingConnection ? "Testing..." : "Test Connection Now"}
+                  </Button>
+                </div>
+
+                {connectionTestResult && (
+                  <div
+                    className={`p-3.5 rounded-xl text-xs space-y-1.5 ${
+                      connectionTestResult.success
+                        ? "bg-emerald-50 border border-emerald-200 text-emerald-900"
+                        : "bg-red-50 border border-red-200 text-red-900"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold">
+                      {connectionTestResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      )}
+                      <span>
+                        {connectionTestResult.success
+                          ? "Zoho IMAP Connected Successfully!"
+                          : "Zoho IMAP Connection Notice"}
+                      </span>
+                    </div>
+                    <p className="leading-relaxed pl-6">{connectionTestResult.message}</p>
+                    {!connectionTestResult.success && (
+                      <div className="pl-6 pt-1 text-[11px] text-slate-600 space-y-1">
+                        <p>
+                          💡 <strong>Why this happens:</strong>
+                        </p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>
+                            <strong>Zoho Free Plan limitation:</strong> Zoho Mail free accounts do not include IMAP/POP third-party sync.
+                          </li>
+                          <li>
+                            <strong>Free solution:</strong> Check and reply directly in Zoho Webmail (
+                            <a
+                              href="https://mail.zoho.com"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-emerald-700 underline font-semibold"
+                            >
+                              mail.zoho.com
+                            </a>
+                            ) or the free Zoho Mail mobile app.
+                          </li>
+                          <li>
+                            <strong>Portal sync solution:</strong> If you want automatic syncing inside this dashboard, upgrade Zoho to Zoho Mail Lite (~₹65/mo) or enable IMAP in Zoho Mail Settings.
+                          </li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Section: Save App Passwords to Database */}
+              <form onSubmit={handleSaveCredentials} className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4">
+                <div>
+                  <h5 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <Key className="w-4 h-4 text-[#c99f3b]" />
+                    Zoho App Passwords Configuration
+                  </h5>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Save your Zoho App Passwords directly into the secure system database so you don&apos;t have to re-deploy or modify VPS files.
+                  </p>
+                </div>
+
+                {credSaveNotice && (
+                  <div
+                    className={`p-2.5 rounded-lg text-xs font-semibold ${
+                      credSaveNotice.type === "success"
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                        : "bg-red-100 text-red-800 border border-red-300"
+                    }`}
+                  >
+                    {credSaveNotice.text}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-700">
+                        Principal Mailbox (principal@juniordpsdarbhanga.com)
+                      </label>
+                      <span className="text-[11px] font-semibold">
+                        {credStatus?.principal ? (
+                          <span className="text-emerald-600 flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Password Configured
+                          </span>
+                        ) : (
+                          <span className="text-amber-600">Not Configured</span>
+                        )}
+                      </span>
+                    </div>
+                    <input
+                      type="password"
+                      placeholder="Paste Zoho App Password (e.g. abcd efgh ijkl mnop)"
+                      value={passwordInputs.principal}
+                      onChange={(e) =>
+                        setPasswordsInput((prev) => ({ ...prev, principal: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 font-mono focus:border-emerald-600 focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-700">
+                        Admissions Mailbox (info@juniordpsdarbhanga.com)
+                      </label>
+                      <span className="text-[11px] font-semibold">
+                        {credStatus?.info ? (
+                          <span className="text-emerald-600 flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Password Configured
+                          </span>
+                        ) : (
+                          <span className="text-amber-600">Not Configured</span>
+                        )}
+                      </span>
+                    </div>
+                    <input
+                      type="password"
+                      placeholder="Paste Zoho App Password"
+                      value={passwordInputs.info}
+                      onChange={(e) =>
+                        setPasswordsInput((prev) => ({ ...prev, info: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 font-mono focus:border-emerald-600 focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-700">
+                        Accounts Mailbox (account@juniordpsdarbhanga.com)
+                      </label>
+                      <span className="text-[11px] font-semibold">
+                        {credStatus?.account ? (
+                          <span className="text-emerald-600 flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Password Configured
+                          </span>
+                        ) : (
+                          <span className="text-amber-600">Not Configured</span>
+                        )}
+                      </span>
+                    </div>
+                    <input
+                      type="password"
+                      placeholder="Paste Zoho App Password"
+                      value={passwordInputs.account}
+                      onChange={(e) =>
+                        setPasswordsInput((prev) => ({ ...prev, account: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 font-mono focus:border-emerald-600 focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                  <a
+                    href="https://accounts.zoho.com/home#security/app_password"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-emerald-700 hover:underline flex items-center gap-1 font-medium"
+                  >
+                    <ExternalLink className="w-3 h-3" /> Generate Zoho App Password ↗
+                  </a>
+                  <Button
+                    type="submit"
+                    disabled={
+                      savingCreds ||
+                      (!passwordInputs.principal && !passwordInputs.info && !passwordInputs.account)
+                    }
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2"
+                  >
+                    {savingCreds ? "Saving..." : "Save Passwords to Database"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-200 flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowZohoSettings(false)}
+                className="font-bold text-xs"
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </div>
       )}

@@ -23,22 +23,83 @@ let lastSyncStats = {
   mailboxStatus: {} as Record<string, { status: string; lastChecked?: string; newEmails?: number; error?: string }>,
 };
 
+let cachedDbCredentials: Record<string, string> = {};
+
+export function setCachedCredentials(creds: Record<string, string>) {
+  cachedDbCredentials = { ...cachedDbCredentials, ...creds };
+}
+
+export async function loadDbCredentials(getDb: () => Promise<Db | null>) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const doc = await db.collection("admin_settings").findOne({ _id: "mailbox_credentials" as any });
+    if (doc && doc.credentials) {
+      cachedDbCredentials = { ...cachedDbCredentials, ...doc.credentials };
+    }
+  } catch (err) {
+    console.error("[Zoho IMAP] Error loading db credentials:", err);
+  }
+}
+
+export async function saveDbCredentials(
+  getDb: () => Promise<Db | null>,
+  credentials: Record<string, string>
+) {
+  cachedDbCredentials = { ...cachedDbCredentials, ...credentials };
+  const db = await getDb();
+  if (db) {
+    await db.collection("admin_settings").updateOne(
+      { _id: "mailbox_credentials" as any },
+      {
+        $set: {
+          credentials: cachedDbCredentials,
+          updated_at: new Date().toISOString(),
+        },
+      },
+      { upsert: true }
+    );
+  }
+}
+
+export function getCredentialsConfigStatus() {
+  return {
+    principal: !!getZohoPassword("principal"),
+    info: !!getZohoPassword("info"),
+    account: !!getZohoPassword("account"),
+    hasAny: !!(getZohoPassword("principal") || getZohoPassword("info") || getZohoPassword("account")),
+  };
+}
+
 export function getSyncStatus() {
   return {
     isSyncing,
     lastSyncTimestamp,
     stats: lastSyncStats,
+    credentials: getCredentialsConfigStatus(),
   };
 }
 
 function getZohoPassword(key: "principal" | "info" | "account"): string | null {
   let pass: string | undefined;
   if (key === "principal") {
-    pass = process.env.ZOHO_SMTP_PASS_PRINCIPAL || process.env.ZOHO_IMAP_PASS_PRINCIPAL || process.env.ZOHO_SMTP_PASS;
+    pass =
+      cachedDbCredentials.principal ||
+      process.env.ZOHO_SMTP_PASS_PRINCIPAL ||
+      process.env.ZOHO_IMAP_PASS_PRINCIPAL ||
+      process.env.ZOHO_SMTP_PASS;
   } else if (key === "info") {
-    pass = process.env.ZOHO_SMTP_PASS_INFO || process.env.ZOHO_IMAP_PASS_INFO || process.env.ZOHO_SMTP_PASS;
+    pass =
+      cachedDbCredentials.info ||
+      process.env.ZOHO_SMTP_PASS_INFO ||
+      process.env.ZOHO_IMAP_PASS_INFO ||
+      process.env.ZOHO_SMTP_PASS;
   } else if (key === "account") {
-    pass = process.env.ZOHO_SMTP_PASS_ACCOUNT || process.env.ZOHO_IMAP_PASS_ACCOUNT || process.env.ZOHO_SMTP_PASS;
+    pass =
+      cachedDbCredentials.account ||
+      process.env.ZOHO_SMTP_PASS_ACCOUNT ||
+      process.env.ZOHO_IMAP_PASS_ACCOUNT ||
+      process.env.ZOHO_SMTP_PASS;
   }
   if (!pass) return null;
   return pass.replace(/[\s-]+/g, "").trim();
@@ -59,6 +120,84 @@ function getZohoImapPort(): number {
   return 993;
 }
 
+function formatZohoError(err: any): string {
+  const msg = err?.message || String(err);
+  if (/AUTHENTICATIONFAILED/i.test(msg) || /invalid credentials/i.test(msg)) {
+    return "Zoho rejected credentials. If you are on the Zoho Free plan, Zoho disables IMAP access. Check App Password or use Zoho Webmail (mail.zoho.com).";
+  }
+  if (/disabled/i.test(msg) && /imap/i.test(msg)) {
+    return "IMAP access is disabled in your Zoho account settings (common on Zoho Free tier).";
+  }
+  if (/ETIMEDOUT|timeout/i.test(msg)) {
+    return "Connection to Zoho IMAP server timed out.";
+  }
+  return msg;
+}
+
+export async function testZohoAccountConnection(
+  mailboxKey: "principal" | "info" | "account"
+): Promise<{
+  configured: boolean;
+  email: string;
+  host: string;
+  port: number;
+  success: boolean;
+  message: string;
+}> {
+  const mb = ZOHO_MAILBOXES.find((m) => m.key === mailboxKey) || ZOHO_MAILBOXES[0];
+  const password = getZohoPassword(mailboxKey);
+  const host = getZohoImapHost();
+  const port = getZohoImapPort();
+
+  if (!password) {
+    return {
+      configured: false,
+      email: mb.email,
+      host,
+      port,
+      success: false,
+      message: `No app password configured for ${mb.email}. Please set it in Settings or environment secrets.`,
+    };
+  }
+
+  const client = new ImapFlow({
+    host,
+    port,
+    secure: port === 993,
+    auth: { user: mb.email, pass: password },
+    logger: false,
+    tls: { rejectUnauthorized: false },
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+  });
+
+  try {
+    await client.connect();
+    const status = await client.status("INBOX", { messages: true, unseen: true });
+    await client.logout();
+    return {
+      configured: true,
+      email: mb.email,
+      host,
+      port,
+      success: true,
+      message: `Connected successfully! Inbox has ${status.messages || 0} total messages (${status.unseen || 0} unread).`,
+    };
+  } catch (err: any) {
+    try {
+      await client.logout();
+    } catch {}
+    return {
+      configured: true,
+      email: mb.email,
+      host,
+      port,
+      success: false,
+      message: formatZohoError(err),
+    };
+  }
+}
+
 export async function syncSingleMailbox(
   mailbox: ZohoMailboxAccount,
   getDb: () => Promise<Db | null>,
@@ -73,30 +212,59 @@ export async function syncSingleMailbox(
     };
   }
 
-  const host = getZohoImapHost();
+  const candidateHosts = Array.from(new Set([getZohoImapHost(), "imappro.zoho.com", "imap.zoho.in"]));
   const port = getZohoImapPort();
 
-  const client = new ImapFlow({
-    host,
-    port,
-    secure: port === 993,
-    auth: {
-      user: mailbox.email,
-      pass: password,
-    },
-    logger: false,
-    tls: {
-      rejectUnauthorized: false,
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-  });
+  let lastErr: any = null;
+  let client: ImapFlow | null = null;
+
+  for (const host of candidateHosts) {
+    try {
+      client = new ImapFlow({
+        host,
+        port,
+        secure: port === 993,
+        auth: {
+          user: mailbox.email,
+          pass: password,
+        },
+        logger: false,
+        tls: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+      });
+
+      await client.connect();
+      // If connected successfully, break out of candidate loop
+      break;
+    } catch (err: any) {
+      lastErr = err;
+      if (client) {
+        try {
+          await client.logout();
+        } catch {}
+      }
+      client = null;
+      // If auth failed, other hosts will also fail with same auth, break early
+      if (/AUTHENTICATIONFAILED|invalid credentials|disabled/i.test(err?.message || "")) {
+        break;
+      }
+    }
+  }
+
+  if (!client) {
+    return {
+      success: false,
+      newCount: 0,
+      error: formatZohoError(lastErr),
+    };
+  }
 
   let newCount = 0;
 
   try {
-    await client.connect();
-
     const lock = await client.getMailboxLock("INBOX");
     try {
       const status = await client.status("INBOX", { messages: true });

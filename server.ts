@@ -9,7 +9,14 @@ import QRCode from "qrcode";
 import { MongoClient, Db, GridFSBucket, ObjectId } from "mongodb";
 import { Resend } from "resend";
 import nodemailer from "nodemailer";
-import { syncAllZohoMailboxes, getSyncStatus } from "./src/server/zohoImapSync";
+import {
+  syncAllZohoMailboxes,
+  getSyncStatus,
+  loadDbCredentials,
+  saveDbCredentials,
+  testZohoAccountConnection,
+  getCredentialsConfigStatus,
+} from "./src/server/zohoImapSync";
 
 
 const PORT = 3000;
@@ -2281,6 +2288,42 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
     res.json({ ok: true, status: getSyncStatus() });
   });
 
+  // Admin Mailbox: Get credentials configured status
+  apiRouter.get("/mailbox/credentials-status", requireAdmin, (req, res) => {
+    res.json({ ok: true, credentials: getCredentialsConfigStatus(), status: getSyncStatus() });
+  });
+
+  // Admin Mailbox: Save Zoho App Password securely to database
+  apiRouter.post("/mailbox/save-credentials", requireAdmin, async (req, res) => {
+    try {
+      const { principal, info, account } = req.body || {};
+      const toSave: Record<string, string> = {};
+      if (principal !== undefined) toSave.principal = String(principal).trim();
+      if (info !== undefined) toSave.info = String(info).trim();
+      if (account !== undefined) toSave.account = String(account).trim();
+
+      await saveDbCredentials(getDb, toSave);
+      auditLog("mailbox.credentials_updated", (req as any).user?.sub, req, {
+        keys: Object.keys(toSave),
+      });
+      res.json({ ok: true, credentials: getCredentialsConfigStatus() });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to save credentials" });
+    }
+  });
+
+  // Admin Mailbox: Test live connection for a Zoho mailbox account
+  apiRouter.post("/mailbox/test-connection", requireAdmin, async (req, res) => {
+    try {
+      const { mailboxKey } = req.body || {};
+      const key = mailboxKey === "info" || mailboxKey === "account" ? mailboxKey : "principal";
+      const result = await testZohoAccountConnection(key);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || "Test connection failed" });
+    }
+  });
+
   // News
   apiRouter.get("/news", async (req, res) => {
     const onlyPublished = req.query.only_published !== "false";
@@ -2659,6 +2702,7 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
   }
 
   async function start() {
+    loadDbCredentials(getDb).catch(() => {});
     warmupContent().catch(() => {});
 
     // Start automated Zoho IMAP synchronization in background (every 60s)
