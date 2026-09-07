@@ -30,6 +30,8 @@ import {
   deleteMailboxEmail,
   simulateTestIncoming,
   getMailboxConfig,
+  syncZohoMailbox,
+  getZohoSyncStatus,
 } from "../lib/api";
 
 const MAILBOX_OPTIONS = [
@@ -49,11 +51,13 @@ export default function MailboxHub() {
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState(null);
 
+  // Zoho IMAP Sync State
+  const [syncingZoho, setSyncingZoho] = useState(false);
+  const [syncNotice, setSyncNotice] = useState(null);
+
   // Modals & Drawers
   const [showCompose, setShowCompose] = useState(false);
-  const [showWebhookGuide, setShowWebhookGuide] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState(false);
 
   // Compose State
   const [composeData, setComposeData] = useState({
@@ -75,6 +79,31 @@ export default function MailboxHub() {
     body: "Hello Principal, testing the live incoming email delivery to verify it lands inside the Admin Panel mailbox!",
   });
   const [testing, setTesting] = useState(false);
+
+  // Trigger manual Zoho IMAP Sync
+  const handleSyncZoho = async () => {
+    setSyncingZoho(true);
+    setSyncNotice(null);
+    try {
+      const res = await syncZohoMailbox();
+      if (res.data && res.data.ok) {
+        const count = res.data.totalNew || 0;
+        if (count > 0) {
+          setSyncNotice({ type: "success", text: `✓ Synced ${count} new email${count > 1 ? "s" : ""} from Zoho!` });
+        } else {
+          setSyncNotice({ type: "info", text: "✓ Zoho Mailbox is completely in sync. No new unread messages." });
+        }
+        await loadEmails(true);
+      } else {
+        setSyncNotice({ type: "error", text: res.data?.error || "Zoho sync error. Check app password in secrets." });
+      }
+    } catch (err) {
+      setSyncNotice({ type: "error", text: err?.response?.data?.error || "Failed to reach Zoho IMAP server." });
+    } finally {
+      setSyncingZoho(false);
+      setTimeout(() => setSyncNotice(null), 6000);
+    }
+  };
 
   // Load emails
   const loadEmails = async (silent = false) => {
@@ -214,42 +243,41 @@ export default function MailboxHub() {
     }
   };
 
-  const copyWebhookUrl = () => {
-    if (!config?.webhook_url) return;
-    navigator.clipboard.writeText(config.webhook_url);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 2000);
-  };
-
   return (
     <div className="space-y-6">
-      {/* Top Banner: Real Connection & Controls */}
+      {/* Top Banner: Real Zoho Connection & Controls */}
       <div className="bg-gradient-to-r from-[#0a3d29] via-[#0d4f36] to-[#0a3d29] text-white p-5 rounded-2xl shadow-lg border border-[#c99f3b]/30">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#c99f3b] text-[#0a3d29]">
-                <ShieldCheck className="w-3.5 h-3.5" /> Approach A: Live Inbound Webhook
+                <ShieldCheck className="w-3.5 h-3.5" /> Zoho Mail Official Sync
               </span>
-              <span className="text-[12px] text-[#fff9e6]/70">100% Free Domain Inbox</span>
+              <span className="text-[12px] text-[#fff9e6]/80 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                Live Two-Way Synchronization
+              </span>
             </div>
             <h2 className="text-xl font-bold font-serif text-[#fff9e6]">Official School Mailbox Hub</h2>
             <p className="text-sm text-[#fff9e6]/80 mt-0.5">
-              Receives live emails via the Inbound Webhook and dispatches official replies directly from your school domain.
+              Directly synced with Zoho Mailboxes (<span className="text-[#c99f3b] font-mono">principal@</span>, <span className="text-[#c99f3b] font-mono">info@</span>, <span className="text-[#c99f3b] font-mono">account@</span>). View incoming replies and dispatch official correspondence.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
             <button
-              onClick={() => setShowWebhookGuide(true)}
-              className="px-3 py-1.5 text-[12px] font-medium rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white transition flex items-center gap-1.5"
+              onClick={handleSyncZoho}
+              disabled={syncingZoho}
+              className="px-3.5 py-1.5 text-[12px] font-bold rounded-lg bg-white/15 hover:bg-white/25 border border-white/25 text-white transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-60"
+              title="Sync incoming emails and replies from Zoho Mail"
             >
-              <Sliders className="w-3.5 h-3.5 text-[#c99f3b]" /> Webhook Setup Guide
+              <RefreshCw className={`w-3.5 h-3.5 text-[#c99f3b] ${syncingZoho ? "animate-spin" : ""}`} />
+              {syncingZoho ? "Syncing Zoho..." : "Sync Zoho Mail"}
             </button>
 
             <button
               onClick={() => setShowTestModal(true)}
-              className="px-3 py-1.5 text-[12px] font-medium rounded-lg bg-[#c99f3b]/20 hover:bg-[#c99f3b]/30 border border-[#c99f3b]/40 text-[#fff9e6] transition flex items-center gap-1.5"
+              className="px-3 py-1.5 text-[12px] font-medium rounded-lg bg-[#c99f3b]/20 hover:bg-[#c99f3b]/30 border border-[#c99f3b]/40 text-[#fff9e6] transition flex items-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-[#c99f3b]" /> Send Test Email
             </button>
@@ -268,12 +296,30 @@ export default function MailboxHub() {
                 setComposeData({ mailbox: "principal", to: "", subject: "", body: "", in_reply_to_id: null });
                 setShowCompose(true);
               }}
-              className="px-3.5 py-1.5 text-[12px] font-bold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white transition flex items-center gap-1.5 shadow"
+              className="px-3.5 py-1.5 text-[12px] font-bold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white transition flex items-center gap-1.5 shadow cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" /> Compose Email
             </button>
           </div>
         </div>
+
+        {/* Sync notification banner */}
+        {syncNotice && (
+          <div
+            className={`mt-3.5 px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 ${
+              syncNotice.type === "success"
+                ? "bg-emerald-950/80 border border-emerald-500/40 text-emerald-200"
+                : syncNotice.type === "error"
+                ? "bg-red-950/80 border border-red-500/40 text-red-200"
+                : "bg-blue-950/80 border border-blue-500/40 text-blue-200"
+            }`}
+          >
+            {syncNotice.type === "success" && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+            {syncNotice.type === "error" && <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />}
+            {syncNotice.type === "info" && <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />}
+            <span>{syncNotice.text}</span>
+          </div>
+        )}
       </div>
 
       {/* Main Mailbox Container */}
@@ -859,120 +905,6 @@ export default function MailboxHub() {
                 </Button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: Webhook Setup Guide */}
-      {showWebhookGuide && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
-            <div className="bg-[#0a3d29] text-white p-4 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-[#c99f3b]" />
-                <h4 className="font-bold font-serif text-[15px] text-[#fff9e6]">
-                  Approach A: Inbound Email Webhook Setup Guide
-                </h4>
-              </div>
-              <button
-                onClick={() => setShowWebhookGuide(false)}
-                className="text-white/70 hover:text-white text-lg font-bold px-2"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-5 text-sm text-slate-700">
-              <div>
-                <h5 className="font-bold text-slate-900 text-base mb-1">
-                  How Inbound Webhook Routing Works (100% Free):
-                </h5>
-                <p className="text-slate-600">
-                  Because Zoho Mail Free Tier does not offer IMAP background synchronization, an Inbound Email Webhook is the standard industry method to receive real incoming emails into your website’s database in real-time.
-                </p>
-              </div>
-
-              {/* Webhook URL box */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Your Public Inbound Webhook Endpoint:
-                </label>
-                <div className="flex items-center gap-2">
-                  <code className="px-3 py-2 rounded-lg bg-slate-900 text-emerald-400 text-xs font-mono flex-1 truncate">
-                    {config?.webhook_url || "https://juniordpsdarbhanga.com/api/webhooks/inbound-email"}
-                  </code>
-                  <button
-                    onClick={copyWebhookUrl}
-                    className="px-3 py-2 rounded-lg bg-[#0a3d29] text-white hover:bg-[#0d4f36] text-xs font-bold flex items-center gap-1 shrink-0"
-                  >
-                    {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copiedUrl ? "Copied!" : "Copy URL"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Method 1: Cloudflare Email Routing (Free) */}
-              <div className="border border-slate-200 rounded-xl p-4 space-y-2">
-                <div className="flex items-center gap-2 font-bold text-slate-900">
-                  <span className="w-5 h-5 rounded-full bg-[#c99f3b] text-[#0a3d29] text-xs flex items-center justify-center font-bold">1</span>
-                  Option 1: Cloudflare Email Routing Worker (100% Free)
-                </div>
-                <p className="text-xs text-slate-600">
-                  If your domain DNS is on Cloudflare: Go to <strong>Email Routing ➔ Email Workers</strong> and paste this snippet:
-                </p>
-                <pre className="bg-slate-900 text-slate-200 p-3 rounded-lg text-[11px] overflow-x-auto font-mono">
-{`export default {
-  async email(message, env, ctx) {
-    const rawEmail = await new Response(message.raw).text();
-    await fetch("${config?.webhook_url || "https://juniordpsdarbhanga.com/api/webhooks/inbound-email"}", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: message.from,
-        to: message.to,
-        subject: message.headers.get("subject") || "(No Subject)",
-        body: rawEmail,
-        date: new Date().toISOString()
-      })
-    });
-  }
-};`}
-                </pre>
-              </div>
-
-              {/* Method 2: SendGrid Inbound Parse (Free) */}
-              <div className="border border-slate-200 rounded-xl p-4 space-y-2">
-                <div className="flex items-center gap-2 font-bold text-slate-900">
-                  <span className="w-5 h-5 rounded-full bg-[#c99f3b] text-[#0a3d29] text-xs flex items-center justify-center font-bold">2</span>
-                  Option 2: SendGrid Inbound Parse (100% Free tier)
-                </div>
-                <p className="text-xs text-slate-600">
-                  In SendGrid Settings ➔ Inbound Parse, add hostname <code>juniordpsdarbhanga.com</code> and paste the webhook URL above.
-                </p>
-              </div>
-
-              {/* Outbound SMTP Status */}
-              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4">
-                <h6 className="font-bold text-amber-900 text-xs uppercase tracking-wider mb-1">
-                  Outbound SMTP Configuration Status:
-                </h6>
-                <p className="text-xs text-amber-800">
-                  {config?.smtp_configured ? (
-                    <span className="text-emerald-700 font-bold">✓ Zoho SMTP credentials detected in environment. Outbound replies will dispatch directly through Zoho!</span>
-                  ) : (
-                    <span>
-                      To send live replies through Zoho SMTP, set <code>ZOHO_SMTP_USER=principal@juniordpsdarbhanga.com</code> and <code>ZOHO_SMTP_PASS=&lt;password&gt;</code> in your deployment environment variables.
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-slate-200 bg-slate-50 shrink-0 flex justify-end">
-              <Button onClick={() => setShowWebhookGuide(false)} className="bg-[#0a3d29] text-white">
-                Done
-              </Button>
-            </div>
           </div>
         </div>
       )}

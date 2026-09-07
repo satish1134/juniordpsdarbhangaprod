@@ -9,6 +9,7 @@ import QRCode from "qrcode";
 import { MongoClient, Db, GridFSBucket, ObjectId } from "mongodb";
 import { Resend } from "resend";
 import nodemailer from "nodemailer";
+import { syncAllZohoMailboxes, getSyncStatus } from "./src/server/zohoImapSync";
 
 
 const PORT = 3000;
@@ -2254,12 +2255,30 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
       smtp_configured: !!(process.env.ZOHO_SMTP_USER && process.env.ZOHO_SMTP_PASS),
       resend_configured: !!getResendKey(),
       has_webhook_secret: !!process.env.INBOUND_WEBHOOK_SECRET,
+      zoho_sync: getSyncStatus(),
       mailboxes: [
         { id: "principal", address: "principal@juniordpsdarbhanga.com", role: "Principal & Academic Leadership" },
         { id: "info", address: "info@juniordpsdarbhanga.com", role: "General Admissions & Enquiries" },
         { id: "account", address: "account@juniordpsdarbhanga.com", role: "Fee Receipts & Accounts Office" },
       ],
     });
+  });
+
+  // Admin Mailbox: Manual Trigger for Zoho IMAP Synchronization
+  apiRouter.post("/mailbox/sync-zoho", requireAdmin, async (req, res) => {
+    try {
+      const syncResult = await syncAllZohoMailboxes(getDb, liveMailboxMessages);
+      auditLog("mailbox.zoho_synced", (req as any).user?.sub, req, { totalNew: syncResult.totalNew });
+      res.json({ ok: true, ...syncResult, status: getSyncStatus() });
+    } catch (err: any) {
+      console.error("[Zoho IMAP] Sync error:", err);
+      res.status(500).json({ ok: false, error: err?.message || "Failed to sync Zoho mailboxes" });
+    }
+  });
+
+  // Admin Mailbox: Fetch current sync status
+  apiRouter.get("/mailbox/sync-status", requireAdmin, (req, res) => {
+    res.json({ ok: true, status: getSyncStatus() });
   });
 
   // News
@@ -2641,6 +2660,17 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
 
   async function start() {
     warmupContent().catch(() => {});
+
+    // Start automated Zoho IMAP synchronization in background (every 60s)
+    setTimeout(() => {
+      syncAllZohoMailboxes(getDb, liveMailboxMessages).catch((err) => {
+        console.warn("[Zoho IMAP Initial Sync Note]:", err?.message || err);
+      });
+    }, 6000);
+
+    setInterval(() => {
+      syncAllZohoMailboxes(getDb, liveMailboxMessages).catch(() => {});
+    }, 60000);
     if (process.env.NODE_ENV !== "production") {
       try {
         const { createServer: createViteServer } = await import("vite");

@@ -144,6 +144,8 @@ export const toggleMailboxStar = (id) => api.patch(`/mailbox/emails/${id}/star`)
 export const deleteMailboxEmail = (id) => api.delete(`/mailbox/emails/${id}`);
 export const simulateTestIncoming = (payload) => api.post("/mailbox/test-incoming", payload);
 export const getMailboxConfig = () => api.get("/mailbox/config");
+export const syncZohoMailbox = () => api.post("/mailbox/sync-zoho");
+export const getZohoSyncStatus = () => api.get("/mailbox/sync-status");
 export const fetchSystemMetrics = () => api.get("/admin/system-metrics");
 
 export const resolveImageUrl = (url) => {
