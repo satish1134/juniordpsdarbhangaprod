@@ -140,7 +140,7 @@ const Hero = ({ onEnquiry }) => {
                   <div className="w-24 h-24 rounded-full border-2 border-[#c99f3b]/40 bg-[#c99f3b]/10 flex items-center justify-center mb-5 shadow-inner">
                     <GraduationCap className="w-12 h-12 text-[#c99f3b]" />
                   </div>
-                  <div className="text-xs uppercase tracking-[0.3em] text-[#c99f3b] font-semibold">Junior Delhi Public School</div>
+                  <div className="text-xs uppercase tracking-[0.3em] text-[#c99f3b] font-semibold">Junior Darbhanga Premium School</div>
                   <div className="font-display text-2xl font-bold mt-2 text-[#fff9e6]">Darbhanga</div>
                   <div className="text-xs text-[#fff9e6]/75 mt-3 max-w-xs leading-relaxed">
                     Nurturing Minds, Shaping Futures • CBSE Affiliation
