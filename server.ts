@@ -1650,7 +1650,7 @@ apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
             </div>
           </div>
           <div class="footer">
-            Junior Delhi Public School, Darbhanga • Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004<br />
+            Junior Darbhanga Premium School, Darbhanga • Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004<br />
             Ph: +91 9470410815 / +91 9430008181
           </div>
         </div>
