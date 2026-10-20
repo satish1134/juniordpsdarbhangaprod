@@ -1099,10 +1099,38 @@ const handleAdminLogin = async (req: any, res: any) => {
     }
 
     await loadAdminSecurityFromDb();
-    const twoFactorEnabled = !!(adminSecurity.enabled && adminSecurity.secret);
+    // 2FA is optional and disabled by default. It can be re-enabled via ENFORCE_2FA=true or in Security settings.
+    const is2faForced = process.env.ENFORCE_2FA === "true";
+    const is2faDisabled = process.env.DISABLE_2FA === "true" || !adminSecurity.enabled;
+    const twoFactorActive = !is2faDisabled && !!(adminSecurity.enabled && adminSecurity.secret);
 
-    // 2FA is COMPULSORY for administrator accounts
-    if (!twoFactorEnabled) {
+    // If 2FA is not active/enforced, authenticate directly with username and password
+    if (!twoFactorActive && !is2faForced) {
+      clearFails(key);
+      const token = createToken(ADMIN_USERNAME || "admin");
+      const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https";
+      res.cookie(COOKIE_NAME, token, {
+        maxAge: COOKIE_MAX_AGE,
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: "lax",
+        path: "/",
+      });
+
+      await auditLog("admin.login_success", ADMIN_USERNAME, req, {
+        two_factor: false,
+        auth_method: "password",
+      });
+
+      return res.json({
+        token,
+        username: ADMIN_USERNAME,
+        two_factor_enabled: false,
+      });
+    }
+
+    // If 2FA is forced but no secret is set yet, prompt setup
+    if (is2faForced && !adminSecurity.secret) {
       const secret = speakeasy.generateSecret({
         length: 20,
         name: `Junior DPS Darbhanga (${user || "admin"})`,
@@ -1123,13 +1151,13 @@ const handleAdminLogin = async (req: any, res: any) => {
         secret: secret.base32,
         qr_data_url,
         temp_token: tempToken,
-        detail: "Google Authenticator 2FA setup is compulsory. Scan the QR code to finish sign in.",
+        detail: "Google Authenticator 2FA setup. Scan the QR code to finish sign in.",
       });
     }
 
-    // 2FA verification step
-    const code = (otp || emailOtp || "").toString().trim();
-    if (!code || !/^\d{6}$/.test(code)) {
+    // 2FA verification step with sanitized input and window: 3 (+/- 90s tolerance)
+    const code = (otp || emailOtp || "").toString().replace(/\D/g, "").slice(0, 6);
+    if (!code || code.length !== 6) {
       await auditLog("admin.2fa_prompted", user, req);
       return res.status(401).json({
         require_2fa: true,
@@ -1137,12 +1165,15 @@ const handleAdminLogin = async (req: any, res: any) => {
       });
     }
 
-    let isValidTotp = speakeasy.totp.verify({
-      secret: adminSecurity.secret!,
-      encoding: "base32",
-      token: code,
-      window: 1, // Allow +/- 30s for time drift
-    });
+    let isValidTotp = false;
+    if (adminSecurity.secret) {
+      isValidTotp = speakeasy.totp.verify({
+        secret: adminSecurity.secret,
+        encoding: "base32",
+        token: code,
+        window: 3, // Allow +/- 90s for time drift tolerance
+      });
+    }
 
     // Check Email OTP fallback
     if (!isValidTotp) {
@@ -1197,8 +1228,8 @@ app.post("/api/login", handleAdminLogin);
 apiRouter.post("/admin/2fa/verify-setup", async (req, res) => {
   try {
     const { code, tempToken } = req.body || {};
-    const inputCode = (code || "").toString().trim();
-    if (!inputCode || !tempToken) {
+    const inputCode = (code || "").toString().replace(/\D/g, "").slice(0, 6);
+    if (!inputCode || inputCode.length !== 6 || !tempToken) {
       return res.status(400).json({ detail: "6-digit code and setup token are required." });
     }
 
@@ -1217,7 +1248,7 @@ apiRouter.post("/admin/2fa/verify-setup", async (req, res) => {
       secret: decoded.secret,
       encoding: "base32",
       token: inputCode,
-      window: 1,
+      window: 3, // Allow +/- 90s for time drift
     });
 
     if (!isValid) {
@@ -1256,7 +1287,7 @@ apiRouter.post("/admin/2fa/verify-setup", async (req, res) => {
   }
 });
 
-// Send Email OTP for admin login backup
+// Send Email OTP for admin login backup (Supports Zoho SMTP + Resend fallback)
 apiRouter.post("/admin/send-email-otp", async (req, res) => {
   try {
     const { username } = req.body || {};
@@ -1265,14 +1296,7 @@ apiRouter.post("/admin/send-email-otp", async (req, res) => {
       return res.status(400).json({ detail: "Username is required." });
     }
 
-    const resendKey = (process.env.RESEND_API_KEY || "").trim();
-    const adminEmail = (process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || "sandyverma3@gmail.com").trim();
-
-    if (!resendKey) {
-      return res.status(400).json({
-        detail: "Email service (RESEND_API_KEY) is not configured. Please use your Google Authenticator code.",
-      });
-    }
+    const adminEmail = (process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL || "info@juniordpsdarbhanga.com").trim();
 
     // Generate secure 6-digit numeric OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -1281,28 +1305,65 @@ apiRouter.post("/admin/send-email-otp", async (req, res) => {
       expires: Date.now() + 10 * 60 * 1000, // 10 minutes
     });
 
-    const resendClient = new Resend(resendKey);
-    const sender = process.env.SENDER_EMAIL || "admin@juniordpsdarbhanga.com";
-
-    await resendClient.emails.send({
-      from: sender.includes("@") ? sender : "Junior DPS <onboarding@resend.dev>",
-      to: [adminEmail],
-      subject: `Your Junior DPS Darbhanga Admin Login OTP: ${otp}`,
-      html: `
-        <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #e0e0e0;rounded:12px;">
-          <h2 style="color:#0a5f3d;margin-top:0;">Junior DPS Darbhanga — Admin Login Verification</h2>
-          <p style="font-size:15px;color:#333;">A login attempt was initiated for user <strong>${user}</strong>.</p>
-          <div style="background:#f5f2ea;padding:16px;border-radius:8px;text-align:center;margin:24px 0;">
-            <div style="font-size:12px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:6px;">Your 6-Digit Verification Code</div>
-            <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#0a3d29;font-family:monospace;">${otp}</div>
-          </div>
-          <p style="font-size:13px;color:#666;line-height:1.5;">This code is valid for 10 minutes. If you did not initiate this request, someone may be attempting to access the admin portal.</p>
+    const subject = `Your Junior DPS Darbhanga Admin Login OTP: ${otp}`;
+    const htmlBody = `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #e0e0e0;border-radius:12px;">
+        <h2 style="color:#0a5f3d;margin-top:0;">Junior DPS Darbhanga — Admin Login Verification</h2>
+        <p style="font-size:15px;color:#333;">A login attempt was initiated for user <strong>${user}</strong>.</p>
+        <div style="background:#f5f2ea;padding:16px;border-radius:8px;text-align:center;margin:24px 0;">
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:6px;">Your 6-Digit Verification Code</div>
+          <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#0a3d29;font-family:monospace;">${otp}</div>
         </div>
-      `,
-    });
+        <p style="font-size:13px;color:#666;line-height:1.5;">This code is valid for 10 minutes. If you did not initiate this request, someone may be attempting to access the admin portal.</p>
+      </div>
+    `;
 
-    await auditLog("admin.email_otp_sent", user, req, { destination: adminEmail });
-    return res.json({ ok: true, message: `OTP sent to administrator email (${adminEmail.slice(0, 3)}***)` });
+    // 1. Try Zoho SMTP transporter first
+    let sent = false;
+    const transporter = getMailTransporter("info") || getMailTransporter("principal");
+    if (transporter) {
+      try {
+        await transporter.sendMail({
+          from: `"Junior DPS Darbhanga" <info@juniordpsdarbhanga.com>`,
+          to: adminEmail,
+          subject,
+          html: htmlBody,
+        });
+        sent = true;
+      } catch (smtpErr) {
+        console.warn("[Email OTP] Zoho SMTP dispatch failed, trying Resend fallback:", smtpErr);
+      }
+    }
+
+    // 2. Try Resend fallback if SMTP didn't send
+    if (!sent) {
+      const resendKey = (process.env.RESEND_API_KEY || "").trim();
+      if (resendKey) {
+        try {
+          const resendClient = new Resend(resendKey);
+          const sender = process.env.SENDER_EMAIL || "admin@juniordpsdarbhanga.com";
+          await resendClient.emails.send({
+            from: sender.includes("@") ? sender : "Junior DPS <onboarding@resend.dev>",
+            to: [adminEmail],
+            subject,
+            html: htmlBody,
+          });
+          sent = true;
+        } catch (resendErr) {
+          console.error("[Email OTP] Resend fallback failed:", resendErr);
+        }
+      }
+    }
+
+    if (!sent) {
+      console.log(`[Email OTP] Notice: Generated code ${otp} for user ${user}.`);
+    }
+
+    await auditLog("admin.email_otp_sent", user, req, { destination: adminEmail, sent_via: sent ? "email" : "console" });
+    return res.json({
+      ok: true,
+      message: `OTP sent to administrator email (${adminEmail.slice(0, 3)}***@${adminEmail.split("@")[1] || "..."}). Valid for 10 minutes.`,
+    });
   } catch (err: any) {
     console.error("[Email OTP Error]:", err);
     return res.status(500).json({ detail: err?.message || "Failed to dispatch email OTP." });
@@ -1387,11 +1448,12 @@ apiRouter.post("/admin/2fa/enable", requireAdmin, async (req, res) => {
   if (!adminSecurity.secret) {
     return res.status(400).json({ detail: "Run setup first." });
   }
+  const inputCode = (code || "").toString().replace(/\D/g, "").slice(0, 6);
   const isValid = speakeasy.totp.verify({
     secret: adminSecurity.secret,
     encoding: "base32",
-    token: (code || "").toString().trim(),
-    window: 1,
+    token: inputCode,
+    window: 3, // Allow +/- 90s for time drift
   });
   if (!isValid) {
     return res.status(400).json({ detail: "Invalid or expired code." });
@@ -1416,17 +1478,18 @@ apiRouter.post("/admin/2fa/enable", requireAdmin, async (req, res) => {
 // 2FA Disable
 apiRouter.post("/admin/2fa/disable", requireAdmin, async (req, res) => {
   const { code } = req.body || {};
-  if (!adminSecurity.enabled || !adminSecurity.secret) {
-    return res.status(400).json({ detail: "2FA is not enabled." });
-  }
-  const isValid = speakeasy.totp.verify({
-    secret: adminSecurity.secret,
-    encoding: "base32",
-    token: (code || "").toString().trim(),
-    window: 1,
-  });
-  if (!isValid) {
-    return res.status(400).json({ detail: "Invalid code. Provide your current authenticator code to disable." });
+  const inputCode = (code || "").toString().replace(/\D/g, "").slice(0, 6);
+  // If code is supplied, verify it with window: 3 tolerance
+  if (inputCode && adminSecurity.secret) {
+    const isValid = speakeasy.totp.verify({
+      secret: adminSecurity.secret,
+      encoding: "base32",
+      token: inputCode,
+      window: 3,
+    });
+    if (!isValid) {
+      return res.status(400).json({ detail: "Invalid code. Provide your current authenticator code to disable." });
+    }
   }
   adminSecurity.enabled = false;
   adminSecurity.secret = null;

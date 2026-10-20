@@ -1,9 +1,9 @@
 // Mock data for Junior DPS Darbhanga website
 
 export const schoolInfo = {
-  name: "Junior DPS Darbhanga",
+  name: "Junior Darbhanga Premium School",
   tagline: "Nurturing Minds, Shaping Futures",
-  fullName: "Junior Delhi Public School, Darbhanga",
+  fullName: "Junior Darbhanga Premium School, Darbhanga",
   established: 2015,
   affiliation: "CBSE Affiliated",
   address: "Mufti Mohallah Rd, Mirzapur, Darbhanga, Bihar 846004",

@@ -344,7 +344,7 @@ const AdminLogin = () => {
                 Admin Sign In
               </h1>
               <p className="text-[14px] text-[#1c2a24]/70 mt-1.5">
-                Protected admin portal. Multi-factor verification enforced.
+                Protected school management portal.
               </p>
 
               {lockoutError && (
