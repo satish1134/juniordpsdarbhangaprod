@@ -1099,13 +1099,12 @@ const handleAdminLogin = async (req: any, res: any) => {
     }
 
     await loadAdminSecurityFromDb();
-    // 2FA is optional and disabled by default. It can be re-enabled via ENFORCE_2FA=true or in Security settings.
+    // 2FA is disabled for now as requested. Set ENFORCE_2FA=true to re-enable.
     const is2faForced = process.env.ENFORCE_2FA === "true";
-    const is2faDisabled = process.env.DISABLE_2FA === "true" || !adminSecurity.enabled;
-    const twoFactorActive = !is2faDisabled && !!(adminSecurity.enabled && adminSecurity.secret);
+    const twoFactorActive = is2faForced;
 
-    // If 2FA is not active/enforced, authenticate directly with username and password
-    if (!twoFactorActive && !is2faForced) {
+    // Direct password authentication without 2FA block
+    if (!twoFactorActive) {
       clearFails(key);
       const token = createToken(ADMIN_USERNAME || "admin");
       const isSecure = req.secure || req.headers["x-forwarded-proto"] === "https";
